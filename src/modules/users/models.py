@@ -16,9 +16,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
-    employee_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True
-    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -33,26 +30,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_logout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant = relationship("Tenant", back_populates="users")
-    employee = relationship("Employee", back_populates="users")
     role_links: Mapped[list[UserRole]] = relationship(
         back_populates="user", cascade="all, delete-orphan", lazy="selectin"
     )
-    counted_stock_counts = relationship(
-        "StockCount",
-        foreign_keys="StockCount.counted_by",
-        back_populates="counted_by_user",
-    )
-    approved_stock_counts = relationship(
-        "StockCount",
-        foreign_keys="StockCount.approved_by",
-        back_populates="approved_by_user",
-    )
-    posted_stock_counts = relationship(
-        "StockCount",
-        foreign_keys="StockCount.posted_by",
-        back_populates="posted_by_user",
-    )
-    stock_movements = relationship("StockMovement", back_populates="posted_by_user")
 
     @property
     def role_ids(self) -> list[uuid.UUID]:
@@ -61,7 +41,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "email", name="users_tenant_id_email_key"),
         Index("users_tenant_id_phone_idx", "tenant_id", "phone"),
-        Index("users_tenant_id_employee_id_idx", "tenant_id", "employee_id"),
         Index("users_tenant_id_status_idx", "tenant_id", "status"),
     )
 

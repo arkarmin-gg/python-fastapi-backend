@@ -1,12 +1,11 @@
-"""initial POS foundation schema
+"""initial foundation schema
 
 Revision ID: 407f2d770c8a
 Revises:
 Create Date: 2026-08-06 00:00:00.000000
 
-Creates the POS/ERP foundation slice from POS_ERD.dbml: tenants,
-employees, users, tenant-scoped RBAC, audit logs, plus user refresh
-tokens for secure auth rotation/logout.
+Creates the multi-tenant foundation: tenants, users, tenant-scoped RBAC,
+audit logs, plus user refresh tokens for secure auth rotation/logout.
 """
 
 from collections.abc import Sequence
@@ -49,9 +48,9 @@ def upgrade() -> None:
         sa.Column("code", sa.String(length=80), nullable=False),
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("legal_name", sa.String(length=250), nullable=True),
-        sa.Column("currency_code", sa.String(length=3), server_default="MMK", nullable=False),
-        sa.Column("timezone", sa.String(length=80), server_default="Asia/Yangon", nullable=False),
-        sa.Column("locale", sa.String(length=20), server_default="my-MM", nullable=False),
+        sa.Column("currency_code", sa.String(length=3), server_default="USD", nullable=False),
+        sa.Column("timezone", sa.String(length=80), server_default="UTC", nullable=False),
+        sa.Column("locale", sa.String(length=20), server_default="en-US", nullable=False),
         sa.Column("status", sa.String(length=50), server_default="active", nullable=False),
         *timestamps(),
         sa.PrimaryKeyConstraint("id", name="tenants_pkey"),
@@ -72,26 +71,6 @@ def upgrade() -> None:
     )
     op.create_index("permissions_code_idx", "permissions", ["code"])
     op.create_index("permissions_module_idx", "permissions", ["module"])
-
-    op.create_table(
-        "employees",
-        uuid_pk(),
-        sa.Column("tenant_id", sa.Uuid(), nullable=False),
-        sa.Column("code", sa.String(length=50), nullable=False),
-        sa.Column("name", sa.String(length=200), nullable=False),
-        sa.Column("phone", sa.String(length=50), nullable=True),
-        sa.Column("position", sa.String(length=120), nullable=True),
-        sa.Column("joined_date", sa.Date(), nullable=True),
-        sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
-        *timestamps(),
-        sa.ForeignKeyConstraint(
-            ["tenant_id"], ["tenants.id"], name="employees_tenant_id_fkey", ondelete="CASCADE"
-        ),
-        sa.PrimaryKeyConstraint("id", name="employees_pkey"),
-        sa.UniqueConstraint("tenant_id", "code", name="employees_tenant_id_code_key"),
-    )
-    op.create_index("employees_tenant_id_name_idx", "employees", ["tenant_id", "name"])
-    op.create_index("employees_tenant_id_is_active_idx", "employees", ["tenant_id", "is_active"])
 
     op.create_table(
         "roles",
@@ -115,7 +94,6 @@ def upgrade() -> None:
         "users",
         uuid_pk(),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
-        sa.Column("employee_id", sa.Uuid(), nullable=True),
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("email", sa.String(length=255), nullable=True),
         sa.Column("phone", sa.String(length=50), nullable=True),
@@ -125,16 +103,12 @@ def upgrade() -> None:
         sa.Column("last_logout_at", sa.DateTime(timezone=True), nullable=True),
         *timestamps(),
         sa.ForeignKeyConstraint(
-            ["employee_id"], ["employees.id"], name="users_employee_id_fkey", ondelete="SET NULL"
-        ),
-        sa.ForeignKeyConstraint(
             ["tenant_id"], ["tenants.id"], name="users_tenant_id_fkey", ondelete="CASCADE"
         ),
         sa.PrimaryKeyConstraint("id", name="users_pkey"),
         sa.UniqueConstraint("tenant_id", "email", name="users_tenant_id_email_key"),
     )
     op.create_index("users_tenant_id_phone_idx", "users", ["tenant_id", "phone"])
-    op.create_index("users_tenant_id_employee_id_idx", "users", ["tenant_id", "employee_id"])
     op.create_index("users_tenant_id_status_idx", "users", ["tenant_id", "status"])
 
     op.create_table(
@@ -291,6 +265,5 @@ def downgrade() -> None:
     op.drop_table("role_permissions")
     op.drop_table("users")
     op.drop_table("roles")
-    op.drop_table("employees")
     op.drop_table("permissions")
     op.drop_table("tenants")

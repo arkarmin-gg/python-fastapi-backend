@@ -22,7 +22,6 @@ pagination:
 This contract currently applies to tenant-scoped management lists such as:
 
 - `GET /api/v1/tenants`
-- `GET /api/v1/employees`
 - `GET /api/v1/users`
 - `GET /api/v1/roles`
 - `GET /api/v1/audit-logs`

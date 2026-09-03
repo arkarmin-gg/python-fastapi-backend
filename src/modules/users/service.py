@@ -8,7 +8,6 @@ from sqlalchemy.orm import selectinload
 from src.foundation_enums import UserStatus
 from src.modules.audit_logs.service import record_audit_log
 from src.modules.auth import security
-from src.modules.employees.models import Employee
 from src.modules.rbac.constants import (
     FOUNDATION_PERMISSION_MODULES,
     MODULE_EXTRA_ACTIONS,
@@ -19,7 +18,6 @@ from src.modules.rbac.constants import (
 )
 from src.modules.rbac.models import Permission, Role, RolePermission
 from src.modules.users.exceptions import (
-    InvalidEmployee,
     InvalidRole,
     SelfDeactivateConflict,
     UserIdentifierConflict,
@@ -90,7 +88,6 @@ async def create(
     actor_user_id: uuid.UUID,
 ) -> User:
     await _ensure_identifier_available(db, tenant_id, data.email)
-    await _ensure_employee(db, tenant_id, data.employee_id)
     await _ensure_roles(db, tenant_id, data.role_ids)
     fields = data.model_dump(exclude={"password", "role_ids"})
     user = User(tenant_id=tenant_id, password_hash=security.hash_password(data.password), **fields)
@@ -129,8 +126,6 @@ async def update(
     fields = data.model_dump(exclude_unset=True, exclude={"password", "role_ids"})
     if "email" in fields and fields["email"] != user.email:
         await _ensure_identifier_available(db, tenant_id, fields["email"], user_id=user.id)
-    if "employee_id" in fields:
-        await _ensure_employee(db, tenant_id, fields["employee_id"])
     if data.role_ids is not None:
         await _ensure_roles(db, tenant_id, data.role_ids)
     for key, value in fields.items():
@@ -258,22 +253,6 @@ async def _ensure_identifier_available(
     existing = await db.scalar(select(User).where(User.tenant_id == tenant_id, User.email == email))
     if existing is not None and existing.id != user_id:
         raise UserIdentifierConflict()
-
-
-async def _ensure_employee(
-    db: AsyncSession,
-    tenant_id: uuid.UUID,
-    employee_id: uuid.UUID | None,
-) -> None:
-    if employee_id is None:
-        return
-    if (
-        await db.scalar(
-            select(Employee.id).where(Employee.tenant_id == tenant_id, Employee.id == employee_id)
-        )
-        is None
-    ):
-        raise InvalidEmployee()
 
 
 async def _ensure_roles(db: AsyncSession, tenant_id: uuid.UUID, role_ids: list[uuid.UUID]) -> None:

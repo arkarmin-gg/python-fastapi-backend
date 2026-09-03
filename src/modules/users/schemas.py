@@ -14,7 +14,6 @@ from src.schemas import RequestSchema, ResponseSchema
 class UserRead(ResponseSchema):
     id: uuid.UUID
     tenant_id: uuid.UUID
-    employee_id: uuid.UUID | None
     name: str
     email: EmailStr | None
     phone: str | None
@@ -48,7 +47,6 @@ def user_filters(
 
 
 class UserCreate(RequestSchema):
-    employee_id: uuid.UUID | None = None
     name: str = Field(min_length=1, max_length=200)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=50)
@@ -64,7 +62,6 @@ class UserCreate(RequestSchema):
 
 
 class UserUpdate(RequestSchema):
-    employee_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=50)

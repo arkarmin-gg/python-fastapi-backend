@@ -82,7 +82,7 @@ async def test_role_crud_and_permission_catalog(
             permission("permissions", ActionType.READ),
         ],
     )
-    target_permission = Permission(code="catalog.read", name="Catalog Read", module="catalog")
+    target_permission = Permission(code="reports.read", name="Reports Read", module="reports")
     db_session.add(target_permission)
     await db_session.flush()
     headers = auth_headers(user_access_token(actor))
@@ -100,7 +100,7 @@ async def test_role_crud_and_permission_catalog(
         headers=headers,
     )
     assert create_response.status_code == 201
-    assert create_response.json()["permissions"][0]["code"] == "catalog.read"
+    assert create_response.json()["permissions"][0]["code"] == "reports.read"
 
     update_response = await client.patch(
         f"/api/v1/roles/{create_response.json()['id']}",
@@ -137,7 +137,7 @@ async def test_rbac_assignment_lifecycle_is_tenant_scoped_and_audited(
             permission("users", ActionType.READ),
         ],
     )
-    target_permission = Permission(code="catalog.read", name="Catalog Read", module="catalog")
+    target_permission = Permission(code="reports.read", name="Reports Read", module="reports")
     db_session.add(target_permission)
     other_role = Role(tenant_id=other_tenant.id, code="other-role", name="Other Role")
     db_session.add(other_role)
@@ -271,43 +271,6 @@ async def test_rbac_assignment_lifecycle_is_tenant_scoped_and_audited(
         "users.assign_role",
         "users.revoke_role",
     }.issubset(actions)
-
-
-async def test_employee_crud(
-    client: AsyncClient,
-    db_session: AsyncSession,
-) -> None:
-    tenant = await make_tenant(db_session, code="employees")
-    actor = await make_user_with_permissions(
-        db_session,
-        tenant=tenant,
-        permissions=[
-            permission("employees", ActionType.CREATE),
-            permission("employees", ActionType.READ),
-            permission("employees", ActionType.UPDATE),
-            permission("employees", ActionType.DELETE),
-        ],
-    )
-    headers = auth_headers(user_access_token(actor))
-
-    created = await client.post(
-        "/api/v1/employees",
-        json={"name": "Aye Aye"},
-        headers=headers,
-    )
-    assert created.status_code == 201
-    assert created.json()["code"].startswith("EMP-")
-
-    updated = await client.patch(
-        f"/api/v1/employees/{created.json()['id']}",
-        json={"position": "Cashier"},
-        headers=headers,
-    )
-    assert updated.status_code == 200
-    assert updated.json()["position"] == "Cashier"
-
-    deleted = await client.delete(f"/api/v1/employees/{created.json()['id']}", headers=headers)
-    assert deleted.status_code == 204
 
 
 async def test_permission_denied_without_required_permission(

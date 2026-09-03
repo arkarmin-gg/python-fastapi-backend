@@ -16,11 +16,6 @@ class SelfDeactivateConflict(ConflictError):
     detail = "A user cannot self deactivate."
 
 
-class InvalidEmployee(NotFoundError):
-    error_code = "invalid_employee"
-    detail = "Employee not found for this tenant."
-
-
 class InvalidRole(NotFoundError):
     error_code = "invalid_role"
     detail = "One or more roles were not found for this tenant."

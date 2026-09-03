@@ -32,12 +32,6 @@ class ConflictError(AppException):
     detail = "Resource already exists."
 
 
-class InvalidUnitQuantity(AppException):
-    status_code = status.HTTP_400_BAD_REQUEST
-    error_code = "invalid_unit_quantity"
-    detail = "Quantity does not comply with the selected unit's quantity rules."
-
-
 class UnauthorizedError(AppException):
     status_code = status.HTTP_401_UNAUTHORIZED
     error_code = "unauthorized"

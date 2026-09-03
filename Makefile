@@ -1,4 +1,4 @@
-.PHONY: help install run migrate makemigration downgrade seed seed-catalog clear-db test lint format
+.PHONY: help install run migrate makemigration downgrade seed clear-db test lint format
 
 help:
 	@echo "python-fastapi-backend — common tasks"
@@ -8,7 +8,6 @@ help:
 	@echo "  make makemigration m=\"msg\"   Autogenerate a migration"
 	@echo "  make downgrade       Revert the last migration"
 	@echo "  make seed            Seed demo tenant + owner user"
-	@echo "  make seed-catalog    Seed demo catalog items, variants, and units"
 	@echo "  make clear-db        Clear all application data (requires confirm=yes)"
 	@echo "  make test            Run unit tests"
 	@echo "  make lint            Check lint + format (no changes)"
@@ -31,9 +30,6 @@ downgrade:
 
 seed:
 	uv run python -m scripts.seed
-
-seed-catalog:
-	uv run python -m scripts.seed_catalog
 
 clear-db:
 	@if [ "$(confirm)" != "yes" ]; then \

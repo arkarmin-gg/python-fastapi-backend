@@ -1,7 +1,6 @@
 import uuid
 from collections.abc import AsyncIterator
 
-import pytest
 import pytest_asyncio
 import src.registry  # noqa: F401
 from httpx import ASGITransport, AsyncClient
@@ -101,7 +100,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
 
 
 async def make_tenant(db_session: AsyncSession, *, code: str | None = None) -> Tenant:
-    tenant = Tenant(code=code or f"tenant-{uuid.uuid4().hex[:8]}", name="Test Grocery")
+    tenant = Tenant(code=code or f"tenant-{uuid.uuid4().hex[:8]}", name="Test Tenant")
     db_session.add(tenant)
     await db_session.flush()
     return tenant
@@ -175,11 +174,3 @@ def auth_headers(token: str) -> dict[str, str]:
 
 def permission(module: str, action: ActionType) -> str:
     return permission_code(module, action)
-
-
-@pytest.fixture(autouse=True)
-def _no_real_storage_io(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "src.storage.service.presigned_url",
-        lambda key, **_: f"https://cdn.test/{key}" if key else None,
-    )

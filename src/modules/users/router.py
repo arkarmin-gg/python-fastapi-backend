@@ -11,7 +11,6 @@ from src.modules.rbac.dependencies import require_permission
 from src.modules.rbac.exceptions import PermissionDenied
 from src.modules.users import service
 from src.modules.users.exceptions import (
-    InvalidEmployee,
     InvalidRole,
     UserIdentifierConflict,
     UserNotFound,
@@ -60,7 +59,7 @@ async def list_users(
     response_model=UserRead,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_permission("users.create"))],
-    responses=error_responses(*AUTH_ERRORS, UserIdentifierConflict, InvalidEmployee, InvalidRole),
+    responses=error_responses(*AUTH_ERRORS, UserIdentifierConflict, InvalidRole),
 )
 async def create_user(db: DbSession, current: CurrentUser, body: UserCreate):
     return await service.create(db, current.tenant_id, body, actor_user_id=current.user_id)
@@ -83,9 +82,7 @@ async def get_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID):
     "/{user_id}",
     response_model=UserRead,
     dependencies=[Depends(require_permission("users.update"))],
-    responses=error_responses(
-        *AUTH_ERRORS, UserNotFound, UserIdentifierConflict, InvalidEmployee, InvalidRole
-    ),
+    responses=error_responses(*AUTH_ERRORS, UserNotFound, UserIdentifierConflict, InvalidRole),
 )
 async def update_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID, body: UserUpdate):
     return await service.update(db, current.tenant_id, user_id, body, actor_user_id=current.user_id)

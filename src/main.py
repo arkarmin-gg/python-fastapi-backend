@@ -18,66 +18,11 @@ SHOW_DOCS_IN = {Environment.LOCAL, Environment.STAGING}
 OPENAPI_TAGS = [
     {"name": "Auth", "description": "Tenant user authentication."},
     {"name": "Tenants", "description": "Tenant/company management."},
-    {"name": "Employees", "description": "Tenant employee records."},
     {"name": "Users", "description": "Tenant user account management."},
     {
         "name": "RBAC",
         "description": "Tenant roles, global permissions, and RBAC assignments.",
     },
-    {"name": "Units", "description": "Globally managed unit catalog for POS products."},
-    {"name": "Product Categories", "description": "Tenant-scoped product category tree."},
-    {
-        "name": "Catalog",
-        "description": (
-            "Tenant-scoped item, variant, option, unit, barcode, POS profile, and location setup."
-        ),
-    },
-    {"name": "Price Levels", "description": "Tenant-scoped customer pricing levels."},
-    {"name": "Price Rules", "description": "Tenant-scoped variant/customer price rules."},
-    {"name": "Customers", "description": "Tenant-scoped customer master data."},
-    {
-        "name": "Customer Payments",
-        "description": "Tenant-scoped customer payment draft workflow and receivables posting.",
-    },
-    {"name": "Suppliers", "description": "Tenant-scoped supplier master data."},
-    {
-        "name": "Supplier Payments",
-        "description": "Tenant-scoped supplier payment draft workflow and payables posting.",
-    },
-    {"name": "Locations", "description": "Tenant-scoped operational location master data."},
-    {
-        "name": "Location Assignments",
-        "description": "Tenant-scoped employee responsibility history for locations.",
-    },
-    {
-        "name": "Purchase Invoices",
-        "description": "Tenant-scoped purchase invoice draft workflow and receiving posting.",
-    },
-    {
-        "name": "Stock Adjustments",
-        "description": "Tenant-scoped stock adjustment draft workflow and inventory posting.",
-    },
-    {
-        "name": "Stock Counts",
-        "description": "Tenant-scoped stock count approval and inventory variance posting.",
-    },
-    {
-        "name": "Stock Transfers",
-        "description": "Tenant-scoped stock transfer draft workflow and inventory posting.",
-    },
-    {
-        "name": "Repack Orders",
-        "description": "Tenant-scoped repack order draft workflow and inventory posting.",
-    },
-    {
-        "name": "Sales Invoices",
-        "description": "Tenant-scoped sales invoice draft workflow and FIFO posting.",
-    },
-    {
-        "name": "POS Checkouts",
-        "description": "Atomic customer checkout, credit control, and receipt snapshots.",
-    },
-    {"name": "Inventory", "description": "Tenant-scoped stock batches, movements, and balances."},
     {"name": "Audit Logs", "description": "Tenant-scoped audit trail."},
 ]
 
@@ -95,8 +40,8 @@ def create_app() -> FastAPI:
         "title": settings.PROJECT_NAME,
         "version": "0.1.0",
         "description": (
-            "FastAPI backend for the POS/ERP foundation slice: tenants, "
-            "employees, users, tenant RBAC, auth, audit logging, and catalog setup."
+            "FastAPI starter for a multi-tenant backend: tenants, users, "
+            "tenant RBAC, auth, and audit logging."
         ),
         "lifespan": lifespan,
         "openapi_url": "/openapi.json" if docs_enabled else None,
