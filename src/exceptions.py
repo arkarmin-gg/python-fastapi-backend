@@ -45,7 +45,7 @@ class ForbiddenError(AppException):
 
 
 class InvalidCredentials(UnauthorizedError):
-    """Shared invalid-login response shape for tenant user auth."""
+    """Shared invalid-login response shape for organization membership auth."""
 
     error_code = "invalid_credentials"
     detail = "Incorrect email or password."

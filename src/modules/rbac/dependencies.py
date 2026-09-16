@@ -8,7 +8,13 @@ from src.modules.rbac.exceptions import PermissionDenied
 
 def require_permission(permission_code: str) -> Callable[..., Awaitable[CurrentUserContext]]:
     async def _guard(current: CurrentUser, db: DbSession) -> CurrentUserContext:
-        if not await rbac_service.user_has_permission(db, current.user, permission_code):
+        if not await rbac_service.user_has_permission(
+            db,
+            current.user,
+            permission_code,
+            organization_id=current.organization_id,
+            membership_id=current.membership_id,
+        ):
             raise PermissionDenied()
         return current
 

@@ -13,6 +13,8 @@ from src.modules.rbac.exceptions import (
     InvalidPermission,
     InvalidRole,
     InvalidUser,
+    MembershipRoleConflict,
+    MembershipRoleNotFound,
     PermissionDenied,
     ProtectedRole,
     RoleAssigned,
@@ -20,10 +22,12 @@ from src.modules.rbac.exceptions import (
     RoleNotFound,
     RolePermissionConflict,
     RolePermissionNotFound,
-    UserRoleConflict,
-    UserRoleNotFound,
 )
 from src.modules.rbac.schemas import (
+    MembershipRoleCreate,
+    MembershipRoleFilters,
+    MembershipRoleListResponse,
+    MembershipRoleRead,
     PermissionRead,
     RoleCreate,
     RoleFilters,
@@ -34,13 +38,9 @@ from src.modules.rbac.schemas import (
     RolePermissionRead,
     RoleRead,
     RoleUpdate,
-    UserRoleCreate,
-    UserRoleFilters,
-    UserRoleListResponse,
-    UserRoleRead,
+    membership_role_filters,
     role_filters,
     role_permission_filters,
-    user_role_filters,
 )
 from src.pagination import PaginationParams, pagination_params
 from src.query_filters import SortSpec, parse_sort
@@ -65,7 +65,7 @@ def role_permission_sort(sort: Annotated[str | None, Query()] = None) -> tuple[S
     )
 
 
-def user_role_sort(sort: Annotated[str | None, Query()] = None) -> tuple[SortSpec, ...]:
+def membership_role_sort(sort: Annotated[str | None, Query()] = None) -> tuple[SortSpec, ...]:
     return parse_sort(
         sort,
         allowed_fields={"user_id", "role_id", "id"},
@@ -86,7 +86,7 @@ async def list_roles(
     filters: Annotated[RoleFilters, Depends(role_filters)],
     sort: Annotated[tuple[SortSpec, ...], Depends(role_sort)],
 ):
-    return await service.list_roles(db, current.tenant_id, pagination, filters, sort)
+    return await service.list_roles(db, current.organization_id, pagination, filters, sort)
 
 
 @router.post(
@@ -97,7 +97,13 @@ async def list_roles(
     responses=error_responses(*AUTH_ERRORS, RoleCodeConflict, InvalidPermission),
 )
 async def create_role(db: DbSession, current: CurrentUser, body: RoleCreate):
-    return await service.create_role(db, current.tenant_id, body, actor_user_id=current.user_id)
+    return await service.create_role(
+        db,
+        current.organization_id,
+        body,
+        actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
+    )
 
 
 @router.get(
@@ -107,7 +113,7 @@ async def create_role(db: DbSession, current: CurrentUser, body: RoleCreate):
     responses=error_responses(*AUTH_ERRORS, RoleNotFound),
 )
 async def get_role(db: DbSession, current: CurrentUser, role_id: uuid.UUID):
-    role = await service.get_role_by_id(db, current.tenant_id, role_id)
+    role = await service.get_role_by_id(db, current.organization_id, role_id)
     if role is None:
         raise RoleNotFound()
     return role
@@ -124,7 +130,7 @@ async def get_role(db: DbSession, current: CurrentUser, role_id: uuid.UUID):
 async def update_role(db: DbSession, current: CurrentUser, role_id: uuid.UUID, body: RoleUpdate):
     return await service.update_role(
         db,
-        current.tenant_id,
+        current.organization_id,
         role_id,
         body,
         actor_user_id=current.user_id,
@@ -139,7 +145,13 @@ async def update_role(db: DbSession, current: CurrentUser, role_id: uuid.UUID, b
     responses=error_responses(*AUTH_ERRORS, RoleNotFound, ProtectedRole, RoleAssigned),
 )
 async def deactivate_role(db: DbSession, current: CurrentUser, role_id: uuid.UUID) -> None:
-    await service.deactivate_role(db, current.tenant_id, role_id, actor_user_id=current.user_id)
+    await service.deactivate_role(
+        db,
+        current.organization_id,
+        role_id,
+        actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
+    )
 
 
 @router.get(
@@ -165,7 +177,9 @@ async def list_role_permissions(
     filters: Annotated[RolePermissionFilters, Depends(role_permission_filters)],
     sort: Annotated[tuple[SortSpec, ...], Depends(role_permission_sort)],
 ):
-    return await service.list_role_permissions(db, current.tenant_id, pagination, filters, sort)
+    return await service.list_role_permissions(
+        db, current.organization_id, pagination, filters, sort
+    )
 
 
 @router.post(
@@ -187,7 +201,7 @@ async def create_role_permission(
 ):
     return await service.create_role_permission(
         db,
-        current.tenant_id,
+        current.organization_id,
         body,
         actor_user_id=current.user_id,
     )
@@ -206,7 +220,7 @@ async def get_role_permission(
 ):
     link = await service.get_role_permission_by_id(
         db,
-        current.tenant_id,
+        current.organization_id,
         role_permission_id,
     )
     if link is None:
@@ -228,80 +242,82 @@ async def delete_role_permission(
 ) -> None:
     await service.delete_role_permission(
         db,
-        current.tenant_id,
+        current.organization_id,
         role_permission_id,
         actor_user_id=current.user_id,
     )
 
 
 @router.get(
-    "/user-roles",
-    response_model=UserRoleListResponse,
+    "/membership-roles",
+    response_model=MembershipRoleListResponse,
     dependencies=[Depends(require_permission("users.read"))],
     responses=error_responses(*AUTH_ERRORS),
 )
-async def list_user_roles(
+async def list_membership_roles(
     db: DbSession,
     current: CurrentUser,
     pagination: Annotated[PaginationParams, Depends(pagination_params)],
-    filters: Annotated[UserRoleFilters, Depends(user_role_filters)],
-    sort: Annotated[tuple[SortSpec, ...], Depends(user_role_sort)],
+    filters: Annotated[MembershipRoleFilters, Depends(membership_role_filters)],
+    sort: Annotated[tuple[SortSpec, ...], Depends(membership_role_sort)],
 ):
-    return await service.list_user_roles(db, current.tenant_id, pagination, filters, sort)
+    return await service.list_membership_roles(
+        db, current.organization_id, pagination, filters, sort
+    )
 
 
 @router.post(
-    "/user-roles",
-    response_model=UserRoleRead,
+    "/membership-roles",
+    response_model=MembershipRoleRead,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_permission("users.update"))],
-    responses=error_responses(*AUTH_ERRORS, InvalidUser, InvalidRole, UserRoleConflict),
+    responses=error_responses(*AUTH_ERRORS, InvalidUser, InvalidRole, MembershipRoleConflict),
 )
-async def create_user_role(
+async def create_membership_role(
     db: DbSession,
     current: CurrentUser,
-    body: UserRoleCreate,
+    body: MembershipRoleCreate,
 ):
-    return await service.create_user_role(
+    return await service.create_membership_role(
         db,
-        current.tenant_id,
+        current.organization_id,
         body,
         actor_user_id=current.user_id,
     )
 
 
 @router.get(
-    "/user-roles/{user_role_id}",
-    response_model=UserRoleRead,
+    "/membership-roles/{membership_role_id}",
+    response_model=MembershipRoleRead,
     dependencies=[Depends(require_permission("users.read"))],
-    responses=error_responses(*AUTH_ERRORS, UserRoleNotFound),
+    responses=error_responses(*AUTH_ERRORS, MembershipRoleNotFound),
 )
-async def get_user_role(
+async def get_membership_role(
     db: DbSession,
     current: CurrentUser,
-    user_role_id: uuid.UUID,
+    membership_role_id: uuid.UUID,
 ):
-    link = await service.get_user_role_by_id(db, current.tenant_id, user_role_id)
+    link = await service.get_membership_role_by_id(db, current.organization_id, membership_role_id)
     if link is None:
-        raise UserRoleNotFound()
+        raise MembershipRoleNotFound()
     return link
 
 
 @router.delete(
-    "/user-roles/{user_role_id}",
+    "/membership-roles/{membership_role_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,
     dependencies=[Depends(require_permission("users.update"))],
-    responses=error_responses(*AUTH_ERRORS, UserRoleNotFound),
+    responses=error_responses(*AUTH_ERRORS, MembershipRoleNotFound),
 )
-async def delete_user_role(
+async def delete_membership_role(
     db: DbSession,
     current: CurrentUser,
-    user_role_id: uuid.UUID,
+    membership_role_id: uuid.UUID,
 ) -> None:
-    await service.delete_user_role(
+    await service.delete_membership_role(
         db,
-        current.tenant_id,
-        user_role_id,
+        current.organization_id,
+        membership_role_id,
         actor_user_id=current.user_id,
     )

@@ -3,27 +3,14 @@ from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from src.foundation_enums import UserStatus
+from src.foundation_enums import MembershipStatus, UserStatus
 from src.modules.audit_logs.service import record_audit_log
 from src.modules.auth import security
-from src.modules.rbac.constants import (
-    FOUNDATION_PERMISSION_MODULES,
-    MODULE_EXTRA_ACTIONS,
-    OWNER_ROLE_CODE,
-    ActionType,
-    extra_permission_code,
-    permission_code,
-)
-from src.modules.rbac.models import Permission, Role, RolePermission
-from src.modules.users.exceptions import (
-    InvalidRole,
-    SelfDeactivateConflict,
-    UserIdentifierConflict,
-    UserNotFound,
-)
-from src.modules.users.models import User, UserRole
+from src.modules.memberships.models import OrganizationMembership
+from src.modules.rbac.models import MembershipRole, Permission, Role, RolePermission
+from src.modules.users.exceptions import UserIdentifierConflict, UserNotFound
+from src.modules.users.models import User
 from src.modules.users.schemas import UserCreate, UserFilters, UserProfileUpdate, UserUpdate
 from src.pagination import Page, PaginationParams, paginate
 from src.query_filters import SortSpec, apply_sort, search_clause
@@ -32,113 +19,140 @@ USER_SORT_COLUMNS = {
     "name": User.name,
     "email": User.email,
     "created_at": User.created_at,
-    "last_login_at": User.last_login_at,
     "id": User.id,
 }
 
 
-async def get_by_id(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User | None:
-    result = await db.execute(
-        select(User)
-        .where(User.tenant_id == tenant_id, User.id == user_id)
-        .options(selectinload(User.role_links))
-    )
-    user = result.scalar_one_or_none()
-    if user is not None:
-        await attach_permission_codes(db, [user])
-    return user
+async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    return await db.get(User, user_id)
 
 
-async def find_for_login(db: AsyncSession, tenant_id: uuid.UUID, identifier: str) -> User | None:
-    result = await db.execute(
-        select(User)
-        .where(
-            User.tenant_id == tenant_id,
-            or_(User.email == identifier, User.phone == identifier),
-        )
-        .options(selectinload(User.role_links))
+async def find_for_login(db: AsyncSession, identifier: str) -> User | None:
+    return await db.scalar(
+        select(User).where(or_(User.email == identifier, User.phone == identifier))
     )
-    return result.scalar_one_or_none()
 
 
 async def list_users(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     pagination: PaginationParams,
     filters: UserFilters,
     sort: tuple[SortSpec, ...],
 ) -> Page[User]:
-    stmt = _apply_filters(select(User).where(User.tenant_id == tenant_id), filters).options(
-        selectinload(User.role_links)
+    # Users visible through active memberships in this organization
+    stmt = (
+        select(User)
+        .join(OrganizationMembership, OrganizationMembership.user_id == User.id)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.status != MembershipStatus.REMOVED,
+        )
     )
+    stmt = _apply_filters(stmt, filters)
     stmt = apply_sort(stmt, sort, USER_SORT_COLUMNS)
-    count_stmt = _apply_filters(
-        select(func.count(User.id)).where(User.tenant_id == tenant_id), filters
+    count_stmt = (
+        select(func.count(User.id))
+        .join(OrganizationMembership, OrganizationMembership.user_id == User.id)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.status != MembershipStatus.REMOVED,
+        )
     )
-    page = await paginate(db, stmt, count_stmt, pagination)
-    await attach_permission_codes(db, page.items)
-    return page
+    count_stmt = _apply_filters(count_stmt, filters)
+    return await paginate(db, stmt, count_stmt, pagination)
 
 
 async def create(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     data: UserCreate,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None,
 ) -> User:
-    await _ensure_identifier_available(db, tenant_id, data.email)
-    await _ensure_roles(db, tenant_id, data.role_ids)
-    fields = data.model_dump(exclude={"password", "role_ids"})
-    user = User(tenant_id=tenant_id, password_hash=security.hash_password(data.password), **fields)
+    user = User(
+        name=data.name,
+        email=data.email,
+        phone=data.phone,
+        password_hash=security.hash_password(data.password),
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
-    await _replace_roles(db, user, data.role_ids)
+    membership = OrganizationMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        status=MembershipStatus.ACTIVE,
+        joined_at=func_now(),
+        activated_at=func_now(),
+    )
+    db.add(membership)
     await db.flush()
+    if data.role_ids:
+        await _replace_membership_roles(db, organization_id, membership.id, data.role_ids)
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="users.create",
         entity_type="user",
         entity_id=user.id,
         after_json=_loggable(user),
     )
     await db.commit()
-    created = await get_by_id(db, tenant_id, user.id)
-    if created is None:
-        raise UserNotFound()
-    return created
+    await db.refresh(user)
+    return user
+
+
+def func_now():
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
 
 
 async def update(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     user_id: uuid.UUID,
     data: UserUpdate,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None,
 ) -> User:
-    user = await get_by_id(db, tenant_id, user_id)
+    user = await get_by_id(db, user_id)
     if user is None:
         raise UserNotFound()
+    membership = await db.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.user_id == user_id,
+        )
+    )
+    if membership is None:
+        raise UserNotFound()
     before = _loggable(user)
-    fields = data.model_dump(exclude_unset=True, exclude={"password", "role_ids"})
-    if "email" in fields and fields["email"] != user.email:
-        await _ensure_identifier_available(db, tenant_id, fields["email"], user_id=user.id)
-    if data.role_ids is not None:
-        await _ensure_roles(db, tenant_id, data.role_ids)
+    fields = data.model_dump(exclude_unset=True)
+    role_ids = fields.pop("role_ids", None)
+
+    await _ensure_identifier_available(
+        db,
+        fields["email"],
+        fields["phone"],
+        exclude_user_id=user.id,
+    )
+
     for key, value in fields.items():
         setattr(user, key, value)
-    if data.password is not None:
-        user.password_hash = security.hash_password(data.password)
-    if data.role_ids is not None:
-        await _replace_roles(db, user, data.role_ids)
+    if role_ids is not None:
+        await _replace_membership_roles(db, organization_id, membership.id, role_ids)
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="users.update",
         entity_type="user",
         entity_id=user.id,
@@ -146,140 +160,134 @@ async def update(
         after_json=_loggable(user),
     )
     await db.commit()
-    updated = await get_by_id(db, tenant_id, user.id)
-    if updated is None:
-        raise UserNotFound()
-    return updated
+    await db.refresh(user)
+    return user
 
 
-async def update_profile(
-    db: AsyncSession,
-    tenant_id: uuid.UUID,
-    user_id: uuid.UUID,
-    data: UserProfileUpdate,
-) -> User:
-    user = await get_by_id(db, tenant_id, user_id)
+async def update_profile(db: AsyncSession, user_id: uuid.UUID, data: UserProfileUpdate) -> User:
+    user = await get_by_id(db, user_id)
     if user is None:
         raise UserNotFound()
     fields = data.model_dump(exclude_unset=True)
-    if "email" in fields and fields["email"] != user.email:
-        await _ensure_identifier_available(db, tenant_id, fields["email"], user_id=user.id)
+    await _ensure_identifier_available(
+        db,
+        fields.get("email", user.email),
+        fields.get("phone", user.phone),
+        exclude_user_id=user.id,
+    )
     for key, value in fields.items():
         setattr(user, key, value)
     await db.commit()
-    updated = await get_by_id(db, tenant_id, user.id)
-    if updated is None:
-        raise UserNotFound()
-    return updated
+    await db.refresh(user)
+    return user
 
 
-async def attach_permission_codes(db: AsyncSession, users: list[User]) -> None:
+async def attach_permission_codes(
+    db: AsyncSession,
+    users: list[User],
+    *,
+    organization_id: uuid.UUID,
+) -> None:
     if not users:
         return
-
-    user_ids = [user.id for user in users]
-    codes_by_user_id: dict[uuid.UUID, set[str]] = {user.id: set() for user in users}
-    owner_user_ids: set[uuid.UUID] = set()
-
-    rows = (
-        await db.execute(
-            select(UserRole.user_id, Role.code, Permission.code)
-            .join(Role, Role.id == UserRole.role_id)
-            .outerjoin(
-                RolePermission,
-                (RolePermission.role_id == Role.id)
-                & (RolePermission.tenant_id == UserRole.tenant_id),
-            )
-            .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-            .where(
-                UserRole.user_id.in_(user_ids),
-                UserRole.tenant_id.in_({user.tenant_id for user in users}),
-                Role.is_active.is_(True),
-            )
+    user_ids = [u.id for u in users]
+    rows = await db.execute(
+        select(OrganizationMembership.user_id, Permission.code)
+        .join(MembershipRole, MembershipRole.membership_id == OrganizationMembership.id)
+        .join(Role, Role.id == MembershipRole.role_id)
+        .join(RolePermission, RolePermission.role_id == Role.id)
+        .join(Permission, Permission.id == RolePermission.permission_id)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.user_id.in_(user_ids),
+            Role.is_active.is_(True),
+            Permission.is_active.is_(True),
         )
-    ).all()
-
-    for user_id, role_code, db_permission_code in rows:
-        if role_code == OWNER_ROLE_CODE:
-            owner_user_ids.add(user_id)
-        if db_permission_code is not None:
-            codes_by_user_id[user_id].add(db_permission_code)
-
-    owner_permission_codes = {
-        permission_code(module, action)
-        for module in FOUNDATION_PERMISSION_MODULES
-        for action in ActionType
-    } | {
-        extra_permission_code(module, extra_action)
-        for module, extra_actions in MODULE_EXTRA_ACTIONS.items()
-        for extra_action in extra_actions
-    }
-    for user_id in owner_user_ids:
-        codes_by_user_id[user_id].update(owner_permission_codes)
-
+    )
+    by_user: dict[uuid.UUID, set[str]] = {uid: set() for uid in user_ids}
+    for user_id, code in rows.all():
+        by_user[user_id].add(code)
     for user in users:
-        user.permission_codes = sorted(codes_by_user_id[user.id])
+        user.permission_codes = sorted(by_user.get(user.id, set()))  # type: ignore[attr-defined]
 
 
 async def deactivate(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     user_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
-) -> None:
-    # Check actor user cannot deactivate yourself
-    if actor_user_id == user_id:
-        raise SelfDeactivateConflict
-
-    await update(
+    actor_membership_id: uuid.UUID | None,
+) -> User:
+    user = await update(
         db,
-        tenant_id,
+        organization_id,
         user_id,
         UserUpdate(status=UserStatus.INACTIVE),
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
     )
+    return user
 
 
 async def _ensure_identifier_available(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
     email: str | None,
+    phone: str | None,
     *,
-    user_id: uuid.UUID | None = None,
+    exclude_user_id: uuid.UUID | None = None,
 ) -> None:
-    if email is None:
-        return
-    existing = await db.scalar(select(User).where(User.tenant_id == tenant_id, User.email == email))
-    if existing is not None and existing.id != user_id:
-        raise UserIdentifierConflict()
+    if email:
+        stmt = select(User.id).where(User.email == email)
+        if exclude_user_id:
+            stmt = stmt.where(User.id != exclude_user_id)
+        if await db.scalar(stmt) is not None:
+            raise UserIdentifierConflict()
+    if phone:
+        stmt = select(User.id).where(User.phone == phone)
+        if exclude_user_id:
+            stmt = stmt.where(User.id != exclude_user_id)
+        if await db.scalar(stmt) is not None:
+            raise UserIdentifierConflict()
 
 
-async def _ensure_roles(db: AsyncSession, tenant_id: uuid.UUID, role_ids: list[uuid.UUID]) -> None:
-    unique_role_ids = set(role_ids)
-    if not unique_role_ids:
-        return
-    found = await db.scalar(
-        select(func.count(Role.id)).where(Role.tenant_id == tenant_id, Role.id.in_(unique_role_ids))
-    )
-    if found != len(unique_role_ids):
-        raise InvalidRole()
+async def _replace_membership_roles(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    role_ids: list[uuid.UUID],
+) -> None:
+    existing = (
+        await db.scalars(
+            select(MembershipRole).where(
+                MembershipRole.organization_id == organization_id,
+                MembershipRole.membership_id == membership_id,
+            )
+        )
+    ).all()
+    for row in existing:
+        await db.delete(row)
+    for role_id in role_ids:
+        role = await db.get(Role, role_id)
+        if role is None or role.organization_id != organization_id:
+            from src.modules.users.exceptions import InvalidRole
 
-
-async def _replace_roles(db: AsyncSession, user: User, role_ids: list[uuid.UUID]) -> None:
-    await db.refresh(user, attribute_names=["role_links"])
-    new_role_ids = set(role_ids)
-    existing_role_ids = {link.role_id for link in user.role_links}
-    user.role_links = [link for link in user.role_links if link.role_id in new_role_ids] + [
-        UserRole(tenant_id=user.tenant_id, user_id=user.id, role_id=role_id)
-        for role_id in new_role_ids - existing_role_ids
-    ]
+            raise InvalidRole()
+        db.add(
+            MembershipRole(
+                organization_id=organization_id,
+                membership_id=membership_id,
+                role_id=role_id,
+            )
+        )
+    await db.flush()
 
 
 def _apply_filters[StmtT: Select[Any]](stmt: StmtT, filters: UserFilters) -> StmtT:
-    search = search_clause([User.name, User.email, User.phone], filters.search)
-    if search is not None:
-        stmt = stmt.where(search)
+    if filters.search:
+        clause = search_clause([User.name, User.email, User.phone], filters.search)
+        if clause is not None:
+            stmt = stmt.where(clause)
     if filters.status is not None:
         stmt = stmt.where(User.status == filters.status)
     return stmt
@@ -287,9 +295,9 @@ def _apply_filters[StmtT: Select[Any]](stmt: StmtT, filters: UserFilters) -> Stm
 
 def _loggable(user: User) -> dict[str, Any]:
     return {
+        "id": str(user.id),
         "name": user.name,
         "email": user.email,
         "phone": user.phone,
         "status": user.status.value,
-        "role_ids": [str(role_id) for role_id in user.role_ids],
     }

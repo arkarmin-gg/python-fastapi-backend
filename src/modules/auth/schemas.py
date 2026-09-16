@@ -4,17 +4,17 @@ from src.schemas import RequestSchema
 
 
 class LoginRequest(RequestSchema):
-    tenant_id: str | None = Field(
-        default=None, description="Tenant UUID. Required if tenant_code is omitted."
+    organization_id: str | None = Field(
+        default=None, description="Organization UUID. Required if organization_code is omitted."
     )
-    tenant_code: str | None = Field(default=None, min_length=1, max_length=80)
+    organization_code: str | None = Field(default=None, min_length=1, max_length=80)
     identifier: str = Field(min_length=1, max_length=255, description="User email or phone.")
     password: str = Field(min_length=1, max_length=128)
 
     @model_validator(mode="after")
-    def tenant_identifier_required(self):
-        if self.tenant_id is None and self.tenant_code is None:
-            raise ValueError("tenant_id or tenant_code is required")
+    def organization_identifier_required(self):
+        if self.organization_id is None and self.organization_code is None:
+            raise ValueError("organization_id or organization_code is required")
         return self
 
 

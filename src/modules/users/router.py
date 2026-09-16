@@ -51,7 +51,7 @@ async def list_users(
     filters: Annotated[UserFilters, Depends(user_filters)],
     sort: Annotated[tuple[SortSpec, ...], Depends(user_sort)],
 ):
-    return await service.list_users(db, current.tenant_id, pagination, filters, sort)
+    return await service.list_users(db, current.organization_id, pagination, filters, sort)
 
 
 @router.post(
@@ -62,7 +62,7 @@ async def list_users(
     responses=error_responses(*AUTH_ERRORS, UserIdentifierConflict, InvalidRole),
 )
 async def create_user(db: DbSession, current: CurrentUser, body: UserCreate):
-    return await service.create(db, current.tenant_id, body, actor_user_id=current.user_id)
+    return await service.create(db, current.organization_id, body, actor_user_id=current.user_id)
 
 
 @router.get(
@@ -72,7 +72,7 @@ async def create_user(db: DbSession, current: CurrentUser, body: UserCreate):
     responses=error_responses(*AUTH_ERRORS, UserNotFound),
 )
 async def get_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID):
-    user = await service.get_by_id(db, current.tenant_id, user_id)
+    user = await service.get_by_id(db, current.organization_id, user_id)
     if user is None:
         raise UserNotFound()
     return user
@@ -85,7 +85,9 @@ async def get_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID):
     responses=error_responses(*AUTH_ERRORS, UserNotFound, UserIdentifierConflict, InvalidRole),
 )
 async def update_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID, body: UserUpdate):
-    return await service.update(db, current.tenant_id, user_id, body, actor_user_id=current.user_id)
+    return await service.update(
+        db, current.organization_id, user_id, body, actor_user_id=current.user_id
+    )
 
 
 @router.delete(
@@ -96,4 +98,4 @@ async def update_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID, b
     responses=error_responses(*AUTH_ERRORS, UserNotFound),
 )
 async def deactivate_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID):
-    await service.deactivate(db, current.tenant_id, user_id, actor_user_id=current.user_id)
+    await service.deactivate(db, current.organization_id, user_id, actor_user_id=current.user_id)

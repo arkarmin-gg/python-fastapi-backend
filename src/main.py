@@ -16,14 +16,14 @@ from src.schemas import ErrorResponse
 SHOW_DOCS_IN = {Environment.LOCAL, Environment.STAGING}
 
 OPENAPI_TAGS = [
-    {"name": "Auth", "description": "Tenant user authentication."},
-    {"name": "Tenants", "description": "Tenant/company management."},
-    {"name": "Users", "description": "Tenant user account management."},
+    {"name": "Auth", "description": "Organization membership authentication."},
+    {"name": "Organizations", "description": "Organization/company management."},
+    {"name": "Users", "description": "Global user identity and org-scoped membership ops."},
     {
         "name": "RBAC",
-        "description": "Tenant roles, global permissions, and RBAC assignments.",
+        "description": "Organization roles, global permissions, and membership-role assignments.",
     },
-    {"name": "Audit Logs", "description": "Tenant-scoped audit trail."},
+    {"name": "Audit Logs", "description": "Organization-scoped audit trail."},
 ]
 
 
@@ -40,8 +40,8 @@ def create_app() -> FastAPI:
         "title": settings.PROJECT_NAME,
         "version": "0.1.0",
         "description": (
-            "FastAPI starter for a multi-tenant backend: tenants, users, "
-            "tenant RBAC, auth, and audit logging."
+            "FastAPI starter for a multi-organization backend: organizations, "
+            "memberships, users, RBAC, auth, and audit logging."
         ),
         "lifespan": lifespan,
         "openapi_url": "/openapi.json" if docs_enabled else None,

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import Query
-from pydantic import EmailStr, Field, model_validator
+from pydantic import Field, model_validator
 
 from src.foundation_enums import UserStatus
 from src.pagination import Page
@@ -13,17 +13,15 @@ from src.schemas import RequestSchema, ResponseSchema
 
 class UserRead(ResponseSchema):
     id: uuid.UUID
-    tenant_id: uuid.UUID
     name: str
-    email: EmailStr | None
+    email: str | None
     phone: str | None
     status: UserStatus
-    role_ids: list[uuid.UUID]
-    permission_codes: list[str]
     last_login_at: datetime | None
     last_logout_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    permission_codes: list[str] = Field(default_factory=list)
 
 
 UserListResponse = Page[UserRead]
@@ -48,29 +46,21 @@ def user_filters(
 
 class UserCreate(RequestSchema):
     name: str = Field(min_length=1, max_length=200)
-    email: EmailStr | None = None
+    email: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=50)
     password: str = Field(min_length=8, max_length=128)
-    status: UserStatus = UserStatus.ACTIVE
     role_ids: list[uuid.UUID] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def require_identifier(self):
-        if self.email is None and self.phone is None:
-            raise ValueError("email or phone is required")
-        return self
 
 
 class UserUpdate(RequestSchema):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    email: EmailStr | None = None
+    email: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=50)
-    password: str | None = Field(default=None, min_length=8, max_length=128)
     status: UserStatus | None = None
     role_ids: list[uuid.UUID] | None = None
 
 
 class UserProfileUpdate(RequestSchema):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    email: EmailStr | None = None
+    email: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=50)

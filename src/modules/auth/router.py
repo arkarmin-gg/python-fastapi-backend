@@ -28,8 +28,8 @@ _AUTH_ERRORS = (InvalidToken, InactiveUser)
 async def login(body: LoginRequest, db: DbSession) -> TokenResponse:
     access_token, refresh_token = await service.login(
         db,
-        tenant_id=body.tenant_id,
-        tenant_code=body.tenant_code,
+        organization_id=body.organization_id,
+        organization_code=body.organization_code,
         identifier=body.identifier,
         password=body.password,
     )
@@ -53,13 +53,16 @@ async def logout(current: CurrentUser, db: DbSession) -> None:
 
 
 @router.get("/me", response_model=UserRead, responses=error_responses(*_AUTH_ERRORS))
-async def me(current: CurrentUser):
-    return current.user
+async def me(current: CurrentUser, db: DbSession):
+    user = await user_service.get_by_id(db, current.user_id)
+    assert user is not None
+    await db.refresh(user)
+    return user
 
 
 @router.patch("/me", response_model=UserRead, responses=error_responses(*_AUTH_ERRORS))
 async def update_me(current: CurrentUser, db: DbSession, body: UserProfileUpdate):
-    return await user_service.update_profile(db, current.tenant_id, current.user_id, body)
+    return await user_service.update_profile(db, current.user_id, body)
 
 
 @router.patch(

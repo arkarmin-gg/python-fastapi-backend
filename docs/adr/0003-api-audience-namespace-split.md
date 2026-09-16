@@ -6,17 +6,17 @@
 The current API keeps foundation resources directly under `/api/v1`:
 
 - `/api/v1/auth`
-- `/api/v1/tenants`
+- `/api/v1/organizations`
 - `/api/v1/users`
 - `/api/v1/roles`
 - `/api/v1/permissions`
 - `/api/v1/audit-logs`
 
-Protected routes use tenant-scoped user auth. Access tokens carry `user_id` and
-`tenant_id`; route dependencies derive tenant context from the token. Clients do not
-choose a tenant namespace in the path.
+Protected routes use organization membership auth. Access tokens carry `sub` (user id),
+`organization_id`, and `membership_id`; route dependencies derive organization context
+from the token. Clients do not choose an organization namespace in the path.
 
 We use one versioned foundation API because this slice has one current authenticated
-audience: tenant users operating management resources. Reintroduce separate audience
+audience: organization members operating management resources. Reintroduce separate audience
 namespaces only when the product has genuinely different clients with different auth,
 authorization, and route stability needs.

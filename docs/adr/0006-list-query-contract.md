@@ -19,9 +19,9 @@ pagination:
 - Services append a stable `id` tie-breaker when the requested sort does not include it,
   so offset/limit pagination has deterministic ordering.
 
-This contract currently applies to tenant-scoped management lists such as:
+This contract currently applies to organization-scoped management lists such as:
 
-- `GET /api/v1/tenants`
+- `GET /api/v1/organizations`
 - `GET /api/v1/users`
 - `GET /api/v1/roles`
 - `GET /api/v1/audit-logs`

@@ -20,7 +20,7 @@ class PermissionRead(ResponseSchema):
 
 class RoleRead(ResponseSchema):
     id: uuid.UUID
-    tenant_id: uuid.UUID
+    organization_id: uuid.UUID
     code: str
     name: str
     description: str | None
@@ -33,21 +33,21 @@ class RoleRead(ResponseSchema):
 
 class RolePermissionRead(ResponseSchema):
     id: uuid.UUID
-    tenant_id: uuid.UUID
+    organization_id: uuid.UUID
     role_id: uuid.UUID
     permission_id: uuid.UUID
 
 
-class UserRoleRead(ResponseSchema):
+class MembershipRoleRead(ResponseSchema):
     id: uuid.UUID
-    tenant_id: uuid.UUID
-    user_id: uuid.UUID
+    organization_id: uuid.UUID
+    membership_id: uuid.UUID
     role_id: uuid.UUID
 
 
 RoleListResponse = Page[RoleRead]
 RolePermissionListResponse = Page[RolePermissionRead]
-UserRoleListResponse = Page[UserRoleRead]
+MembershipRoleListResponse = Page[MembershipRoleRead]
 
 
 class RoleFilters(RequestSchema):
@@ -83,16 +83,16 @@ def role_permission_filters(
     )
 
 
-class UserRoleFilters(RequestSchema):
-    user_id: uuid.UUID | None = None
+class MembershipRoleFilters(RequestSchema):
+    membership_id: uuid.UUID | None = None
     role_id: uuid.UUID | None = None
 
 
-def user_role_filters(
-    user_id: Annotated[uuid.UUID | None, Query()] = None,
+def membership_role_filters(
+    membership_id: Annotated[uuid.UUID | None, Query()] = None,
     role_id: Annotated[uuid.UUID | None, Query()] = None,
-) -> UserRoleFilters:
-    return build_query_model(UserRoleFilters, user_id=user_id, role_id=role_id)
+) -> MembershipRoleFilters:
+    return build_query_model(MembershipRoleFilters, membership_id=membership_id, role_id=role_id)
 
 
 class RoleCreate(RequestSchema):
@@ -116,6 +116,6 @@ class RolePermissionCreate(RequestSchema):
     permission_id: uuid.UUID
 
 
-class UserRoleCreate(RequestSchema):
-    user_id: uuid.UUID
+class MembershipRoleCreate(RequestSchema):
+    membership_id: uuid.UUID
     role_id: uuid.UUID

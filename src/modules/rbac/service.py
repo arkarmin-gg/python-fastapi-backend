@@ -5,32 +5,31 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.foundation_enums import UserStatus
 from src.modules.audit_logs.service import record_audit_log
 from src.modules.rbac.exceptions import (
     InvalidPermission,
     InvalidRole,
     InvalidUser,
+    MembershipRoleConflict,
+    MembershipRoleNotFound,
     ProtectedRole,
     RoleAssigned,
     RoleCodeConflict,
     RoleNotFound,
     RolePermissionConflict,
     RolePermissionNotFound,
-    UserRoleConflict,
-    UserRoleNotFound,
 )
-from src.modules.rbac.models import Permission, Role, RolePermission
+from src.modules.rbac.models import MembershipRole, Permission, Role, RolePermission
 from src.modules.rbac.schemas import (
+    MembershipRoleCreate,
+    MembershipRoleFilters,
     RoleCreate,
     RoleFilters,
     RolePermissionCreate,
     RolePermissionFilters,
     RoleUpdate,
-    UserRoleCreate,
-    UserRoleFilters,
 )
-from src.modules.users.models import User, UserRole
+from src.modules.users.models import User
 from src.pagination import Page, PaginationParams, paginate
 from src.query_filters import SortSpec, apply_sort, search_clause
 
@@ -46,29 +45,40 @@ ROLE_PERMISSION_SORT_COLUMNS = {
     "id": RolePermission.id,
 }
 USER_ROLE_SORT_COLUMNS = {
-    "user_id": UserRole.user_id,
-    "role_id": UserRole.role_id,
-    "id": UserRole.id,
+    "membership_id": MembershipRole.membership_id,
+    "role_id": MembershipRole.role_id,
+    "id": MembershipRole.id,
 }
 
 
-async def user_has_permission(db: AsyncSession, user: User, permission_code: str) -> bool:
-    stmt = (
+async def user_has_permission(
+    db: AsyncSession,
+    user: User,
+    permission_code: str,
+    *,
+    organization_id: uuid.UUID,
+    membership_id: uuid.UUID,
+) -> bool:
+    from src.modules.memberships.models import OrganizationMembership
+
+    result = await db.scalar(
         select(Permission.id)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .join(UserRole, UserRole.role_id == RolePermission.role_id)
-        .join(Role, Role.id == UserRole.role_id)
+        .join(Role, Role.id == RolePermission.role_id)
+        .join(MembershipRole, MembershipRole.role_id == Role.id)
+        .join(OrganizationMembership, OrganizationMembership.id == MembershipRole.membership_id)
         .where(
-            UserRole.tenant_id == user.tenant_id,
-            UserRole.user_id == user.id,
-            RolePermission.tenant_id == user.tenant_id,
+            OrganizationMembership.id == membership_id,
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.user_id == user.id,
             Permission.code == permission_code,
+            Permission.is_active.is_(True),
             Role.is_active.is_(True),
+            Role.organization_id == organization_id,
         )
         .limit(1)
     )
-    result = await db.execute(stmt)
-    return result.first() is not None
+    return result is not None
 
 
 async def list_permissions(db: AsyncSession) -> list[Permission]:
@@ -80,18 +90,20 @@ async def list_permissions(db: AsyncSession) -> list[Permission]:
 
 async def list_role_permissions(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     pagination: PaginationParams,
     filters: RolePermissionFilters,
     sort: tuple[SortSpec, ...],
 ) -> Page[RolePermission]:
     stmt = _apply_role_permission_filters(
-        select(RolePermission).where(RolePermission.tenant_id == tenant_id),
+        select(RolePermission).where(RolePermission.organization_id == organization_id),
         filters,
     )
     stmt = apply_sort(stmt, sort, ROLE_PERMISSION_SORT_COLUMNS)
     count_stmt = _apply_role_permission_filters(
-        select(func.count(RolePermission.id)).where(RolePermission.tenant_id == tenant_id),
+        select(func.count(RolePermission.id)).where(
+            RolePermission.organization_id == organization_id
+        ),
         filters,
     )
     return await paginate(db, stmt, count_stmt, pagination)
@@ -99,12 +111,12 @@ async def list_role_permissions(
 
 async def get_role_permission_by_id(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     role_permission_id: uuid.UUID,
 ) -> RolePermission | None:
     return await db.scalar(
         select(RolePermission).where(
-            RolePermission.tenant_id == tenant_id,
+            RolePermission.organization_id == organization_id,
             RolePermission.id == role_permission_id,
         )
     )
@@ -112,21 +124,23 @@ async def get_role_permission_by_id(
 
 async def create_role_permission(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     data: RolePermissionCreate,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None = None,
 ) -> RolePermission:
-    await _ensure_active_role(db, tenant_id, data.role_id)
+    await _ensure_active_role(db, organization_id, data.role_id)
     await _ensure_permission(db, data.permission_id)
-    await _ensure_role_permission_available(db, tenant_id, data.role_id, data.permission_id)
-    link = RolePermission(tenant_id=tenant_id, **data.model_dump())
+    await _ensure_role_permission_available(db, organization_id, data.role_id, data.permission_id)
+    link = RolePermission(organization_id=organization_id, **data.model_dump())
     db.add(link)
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="roles.assign_permission",
         entity_type="role_permission",
         entity_id=link.id,
@@ -139,12 +153,13 @@ async def create_role_permission(
 
 async def delete_role_permission(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     role_permission_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None = None,
 ) -> None:
-    link = await get_role_permission_by_id(db, tenant_id, role_permission_id)
+    link = await get_role_permission_by_id(db, organization_id, role_permission_id)
     if link is None:
         raise RolePermissionNotFound()
     before = _loggable_role_permission(link)
@@ -152,8 +167,9 @@ async def delete_role_permission(
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="roles.revoke_permission",
         entity_type="role_permission",
         entity_id=link.id,
@@ -162,81 +178,90 @@ async def delete_role_permission(
     await db.commit()
 
 
-async def list_user_roles(
+async def list_membership_roles(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     pagination: PaginationParams,
-    filters: UserRoleFilters,
+    filters: MembershipRoleFilters,
     sort: tuple[SortSpec, ...],
-) -> Page[UserRole]:
-    stmt = _apply_user_role_filters(
-        select(UserRole).where(UserRole.tenant_id == tenant_id),
+) -> Page[MembershipRole]:
+    stmt = _apply_membership_role_filters(
+        select(MembershipRole).where(MembershipRole.organization_id == organization_id),
         filters,
     )
     stmt = apply_sort(stmt, sort, USER_ROLE_SORT_COLUMNS)
-    count_stmt = _apply_user_role_filters(
-        select(func.count(UserRole.id)).where(UserRole.tenant_id == tenant_id),
+    count_stmt = _apply_membership_role_filters(
+        select(func.count(MembershipRole.id)).where(
+            MembershipRole.organization_id == organization_id
+        ),
         filters,
     )
     return await paginate(db, stmt, count_stmt, pagination)
 
 
-async def get_user_role_by_id(
+async def get_membership_role_by_id(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
-    user_role_id: uuid.UUID,
-) -> UserRole | None:
+    organization_id: uuid.UUID,
+    membership_role_id: uuid.UUID,
+) -> MembershipRole | None:
     return await db.scalar(
-        select(UserRole).where(UserRole.tenant_id == tenant_id, UserRole.id == user_role_id)
+        select(MembershipRole).where(
+            MembershipRole.organization_id == organization_id,
+            MembershipRole.id == membership_role_id,
+        )
     )
 
 
-async def create_user_role(
+async def create_membership_role(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
-    data: UserRoleCreate,
+    organization_id: uuid.UUID,
+    data: MembershipRoleCreate,
     *,
     actor_user_id: uuid.UUID,
-) -> UserRole:
-    await _ensure_active_user(db, tenant_id, data.user_id)
-    await _ensure_active_role(db, tenant_id, data.role_id)
-    await _ensure_user_role_available(db, tenant_id, data.user_id, data.role_id)
-    link = UserRole(tenant_id=tenant_id, **data.model_dump())
+    actor_membership_id: uuid.UUID | None = None,
+) -> MembershipRole:
+    await _ensure_active_membership(db, organization_id, data.membership_id)
+    await _ensure_active_role(db, organization_id, data.role_id)
+    await _ensure_membership_role_available(db, organization_id, data.membership_id, data.role_id)
+    link = MembershipRole(organization_id=organization_id, **data.model_dump())
     db.add(link)
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="users.assign_role",
-        entity_type="user_role",
+        entity_type="membership_role",
         entity_id=link.id,
-        after_json=_loggable_user_role(link),
+        after_json=_loggable_membership_role(link),
     )
     await db.commit()
     await db.refresh(link)
     return link
 
 
-async def delete_user_role(
+async def delete_membership_role(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
-    user_role_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    membership_role_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None = None,
 ) -> None:
-    link = await get_user_role_by_id(db, tenant_id, user_role_id)
+    link = await get_membership_role_by_id(db, organization_id, membership_role_id)
     if link is None:
-        raise UserRoleNotFound()
-    before = _loggable_user_role(link)
+        raise MembershipRoleNotFound()
+    before = _loggable_membership_role(link)
     await db.delete(link)
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="users.revoke_role",
-        entity_type="user_role",
+        entity_type="membership_role",
         entity_id=link.id,
         before_json=before,
     )
@@ -245,25 +270,27 @@ async def delete_user_role(
 
 async def list_roles(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     pagination: PaginationParams,
     filters: RoleFilters,
     sort: tuple[SortSpec, ...],
 ) -> Page[Role]:
-    stmt = _apply_filters(select(Role).where(Role.tenant_id == tenant_id), filters).options(
-        selectinload(Role.permission_links).joinedload(RolePermission.permission)
-    )
+    stmt = _apply_filters(
+        select(Role).where(Role.organization_id == organization_id), filters
+    ).options(selectinload(Role.permission_links).joinedload(RolePermission.permission))
     stmt = apply_sort(stmt, sort, ROLE_SORT_COLUMNS)
     count_stmt = _apply_filters(
-        select(func.count(Role.id)).where(Role.tenant_id == tenant_id), filters
+        select(func.count(Role.id)).where(Role.organization_id == organization_id), filters
     )
     return await paginate(db, stmt, count_stmt, pagination)
 
 
-async def get_role_by_id(db: AsyncSession, tenant_id: uuid.UUID, role_id: uuid.UUID) -> Role | None:
+async def get_role_by_id(
+    db: AsyncSession, organization_id: uuid.UUID, role_id: uuid.UUID
+) -> Role | None:
     result = await db.execute(
         select(Role)
-        .where(Role.tenant_id == tenant_id, Role.id == role_id)
+        .where(Role.organization_id == organization_id, Role.id == role_id)
         .options(selectinload(Role.permission_links).joinedload(RolePermission.permission))
     )
     return result.scalar_one_or_none()
@@ -271,15 +298,16 @@ async def get_role_by_id(db: AsyncSession, tenant_id: uuid.UUID, role_id: uuid.U
 
 async def create_role(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     data: RoleCreate,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None = None,
 ) -> Role:
-    await _ensure_role_code_available(db, tenant_id, data.code)
+    await _ensure_role_code_available(db, organization_id, data.code)
     await _ensure_permissions(db, data.permission_ids)
     role = Role(
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         code=data.code,
         name=data.name,
         description=data.description,
@@ -291,15 +319,16 @@ async def create_role(
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="roles.create",
         entity_type="role",
         entity_id=role.id,
         after_json=_loggable(role),
     )
     await db.commit()
-    created = await get_role_by_id(db, tenant_id, role.id)
+    created = await get_role_by_id(db, organization_id, role.id)
     if created is None:
         raise RoleNotFound()
     return created
@@ -307,13 +336,14 @@ async def create_role(
 
 async def update_role(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     role_id: uuid.UUID,
     data: RoleUpdate,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None = None,
 ) -> Role:
-    role = await get_role_by_id(db, tenant_id, role_id)
+    role = await get_role_by_id(db, organization_id, role_id)
     if role is None:
         raise RoleNotFound()
     if role.is_system and data.is_active is False:
@@ -321,7 +351,7 @@ async def update_role(
     before = _loggable(role)
     fields = data.model_dump(exclude_unset=True, exclude={"permission_ids"})
     if "code" in fields and fields["code"] != role.code:
-        await _ensure_role_code_available(db, tenant_id, fields["code"], role_id=role.id)
+        await _ensure_role_code_available(db, organization_id, fields["code"], role_id=role.id)
     for key, value in fields.items():
         setattr(role, key, value)
     if data.permission_ids is not None:
@@ -330,8 +360,9 @@ async def update_role(
     await db.flush()
     await record_audit_log(
         db,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
         action="roles.update",
         entity_type="role",
         entity_id=role.id,
@@ -339,7 +370,7 @@ async def update_role(
         after_json=_loggable(role),
     )
     await db.commit()
-    updated = await get_role_by_id(db, tenant_id, role.id)
+    updated = await get_role_by_id(db, organization_id, role.id)
     if updated is None:
         raise RoleNotFound()
     return updated
@@ -347,26 +378,27 @@ async def update_role(
 
 async def deactivate_role(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     role_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
+    actor_membership_id: uuid.UUID | None = None,
 ) -> None:
-    role = await get_role_by_id(db, tenant_id, role_id)
+    role = await get_role_by_id(db, organization_id, role_id)
     if role is None:
         raise RoleNotFound()
     if role.is_system:
         raise ProtectedRole()
     assigned = await db.scalar(
-        select(func.count(UserRole.id)).where(
-            UserRole.tenant_id == tenant_id, UserRole.role_id == role_id
+        select(func.count(MembershipRole.id)).where(
+            MembershipRole.organization_id == organization_id, MembershipRole.role_id == role_id
         )
     )
     if assigned:
         raise RoleAssigned()
     await update_role(
         db,
-        tenant_id,
+        organization_id,
         role_id,
         RoleUpdate(is_active=False),
         actor_user_id=actor_user_id,
@@ -375,12 +407,14 @@ async def deactivate_role(
 
 async def _ensure_role_code_available(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     code: str,
     *,
     role_id: uuid.UUID | None = None,
 ) -> None:
-    existing = await db.scalar(select(Role).where(Role.tenant_id == tenant_id, Role.code == code))
+    existing = await db.scalar(
+        select(Role).where(Role.organization_id == organization_id, Role.code == code)
+    )
     if existing is not None and existing.id != role_id:
         raise RoleCodeConflict()
 
@@ -401,7 +435,9 @@ async def _replace_permissions(
 ) -> None:
     await db.refresh(role, attribute_names=["permission_links"])
     role.permission_links = [
-        RolePermission(tenant_id=role.tenant_id, role_id=role.id, permission_id=permission_id)
+        RolePermission(
+            organization_id=role.organization_id, role_id=role.id, permission_id=permission_id
+        )
         for permission_id in set(permission_ids)
     ]
 
@@ -426,21 +462,23 @@ def _apply_role_permission_filters[StmtT: Select[Any]](
     return stmt
 
 
-def _apply_user_role_filters[StmtT: Select[Any]](
+def _apply_membership_role_filters[StmtT: Select[Any]](
     stmt: StmtT,
-    filters: UserRoleFilters,
+    filters: MembershipRoleFilters,
 ) -> StmtT:
-    if filters.user_id is not None:
-        stmt = stmt.where(UserRole.user_id == filters.user_id)
+    if filters.membership_id is not None:
+        stmt = stmt.where(MembershipRole.membership_id == filters.membership_id)
     if filters.role_id is not None:
-        stmt = stmt.where(UserRole.role_id == filters.role_id)
+        stmt = stmt.where(MembershipRole.role_id == filters.role_id)
     return stmt
 
 
-async def _ensure_active_role(db: AsyncSession, tenant_id: uuid.UUID, role_id: uuid.UUID) -> Role:
+async def _ensure_active_role(
+    db: AsyncSession, organization_id: uuid.UUID, role_id: uuid.UUID
+) -> Role:
     role = await db.scalar(
         select(Role).where(
-            Role.tenant_id == tenant_id,
+            Role.organization_id == organization_id,
             Role.id == role_id,
             Role.is_active.is_(True),
         )
@@ -450,17 +488,22 @@ async def _ensure_active_role(db: AsyncSession, tenant_id: uuid.UUID, role_id: u
     return role
 
 
-async def _ensure_active_user(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User:
-    user = await db.scalar(
-        select(User).where(
-            User.tenant_id == tenant_id,
-            User.id == user_id,
-            User.status == UserStatus.ACTIVE,
+async def _ensure_active_membership(
+    db: AsyncSession, organization_id: uuid.UUID, membership_id: uuid.UUID
+):
+    from src.foundation_enums import MembershipStatus
+    from src.modules.memberships.models import OrganizationMembership
+
+    membership = await db.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.id == membership_id,
+            OrganizationMembership.status == MembershipStatus.ACTIVE,
         )
     )
-    if user is None:
+    if membership is None:
         raise InvalidUser()
-    return user
+    return membership
 
 
 async def _ensure_permission(db: AsyncSession, permission_id: uuid.UUID) -> Permission:
@@ -472,13 +515,13 @@ async def _ensure_permission(db: AsyncSession, permission_id: uuid.UUID) -> Perm
 
 async def _ensure_role_permission_available(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     role_id: uuid.UUID,
     permission_id: uuid.UUID,
 ) -> None:
     existing = await db.scalar(
         select(RolePermission).where(
-            RolePermission.tenant_id == tenant_id,
+            RolePermission.organization_id == organization_id,
             RolePermission.role_id == role_id,
             RolePermission.permission_id == permission_id,
         )
@@ -487,21 +530,21 @@ async def _ensure_role_permission_available(
         raise RolePermissionConflict()
 
 
-async def _ensure_user_role_available(
+async def _ensure_membership_role_available(
     db: AsyncSession,
-    tenant_id: uuid.UUID,
+    organization_id: uuid.UUID,
     user_id: uuid.UUID,
     role_id: uuid.UUID,
 ) -> None:
     existing = await db.scalar(
-        select(UserRole).where(
-            UserRole.tenant_id == tenant_id,
-            UserRole.user_id == user_id,
-            UserRole.role_id == role_id,
+        select(MembershipRole).where(
+            MembershipRole.organization_id == organization_id,
+            MembershipRole.membership_id == user_id,
+            MembershipRole.role_id == role_id,
         )
     )
     if existing is not None:
-        raise UserRoleConflict()
+        raise MembershipRoleConflict()
 
 
 def _loggable(role: Role) -> dict[str, Any]:
@@ -521,8 +564,8 @@ def _loggable_role_permission(link: RolePermission) -> dict[str, Any]:
     }
 
 
-def _loggable_user_role(link: UserRole) -> dict[str, Any]:
+def _loggable_membership_role(link: MembershipRole) -> dict[str, Any]:
     return {
-        "user_id": str(link.user_id),
+        "membership_id": str(link.membership_id),
         "role_id": str(link.role_id),
     }

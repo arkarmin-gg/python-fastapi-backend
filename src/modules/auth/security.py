@@ -23,11 +23,12 @@ def verify_password(password: str, password_hash: str) -> bool:
     return True
 
 
-def create_access_token(user_id: str, tenant_id: str) -> str:
+def create_access_token(user_id: str, organization_id: str, membership_id: str) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": user_id,
-        "tenant_id": tenant_id,
+        "organization_id": organization_id,
+        "membership_id": membership_id,
         "type": "access",
         "iat": now,
         "exp": now + timedelta(minutes=auth_settings.JWT_ACCESS_EXP_MINUTES),

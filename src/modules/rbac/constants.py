@@ -1,6 +1,7 @@
 from enum import StrEnum
 
 OWNER_ROLE_CODE = "owner"
+OWNER_TEMPLATE_CODE = "owner"
 
 
 class ActionType(StrEnum):
@@ -11,15 +12,18 @@ class ActionType(StrEnum):
 
 
 FOUNDATION_PERMISSION_MODULES = (
-    "tenants",
+    "organizations",
     "users",
+    "memberships",
     "roles",
     "permissions",
     "audit_logs",
 )
 
 
-MODULE_EXTRA_ACTIONS: dict[str, tuple[str, ...]] = {}
+MODULE_EXTRA_ACTIONS: dict[str, tuple[str, ...]] = {
+    "memberships": ("invite", "remove"),
+}
 
 
 def permission_code(module: str, action: ActionType) -> str:

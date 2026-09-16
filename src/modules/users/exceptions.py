@@ -8,7 +8,7 @@ class UserNotFound(NotFoundError):
 
 class UserIdentifierConflict(ConflictError):
     error_code = "user_identifier_conflict"
-    detail = "A user with this email already exists for the tenant."
+    detail = "A user with this email already exists."
 
 
 class SelfDeactivateConflict(ConflictError):
@@ -18,4 +18,4 @@ class SelfDeactivateConflict(ConflictError):
 
 class InvalidRole(NotFoundError):
     error_code = "invalid_role"
-    detail = "One or more roles were not found for this tenant."
+    detail = "One or more roles were not found for this organization."

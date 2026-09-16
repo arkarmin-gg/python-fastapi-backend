@@ -1,20 +1,12 @@
 # Use explicit lifecycle fields instead of automatic soft delete
 
-> **Superseded.** The old starter used a `SoftDeleteMixin` and a session-level
-> `deleted_at IS NULL` filter. The current foundation schema removed that behavior.
+> **Still current.** The foundation does **not** use a session-level
+> `deleted_at IS NULL` ORM filter.
 
-The current implementation uses explicit lifecycle fields directly:
+`database.dbml` may include `deleted_at` / `suspended_at` on organizations and users as
+**explicit lifecycle timestamps** alongside `status`. Queries that need “active only”
+must filter on `status` (and optionally `deleted_at`) in services — not via a global
+`do_orm_execute` soft-delete hook.
 
-- tenant lifecycle is represented by `tenants.status`
-- user lifecycle is represented by `users.status`
-- role availability is represented by `roles.is_active`
-- permissions are seeded reference data
-- audit logs are append-only
-
-There is no global SQLAlchemy `do_orm_execute` filter and no shared `deleted_at` column in
-the active foundation models. Deactivate/delete-style endpoints update the relevant lifecycle
-field instead of hiding rows through soft delete.
-
-We made this change because keeping starter soft-delete columns beside explicit status
-fields would create two competing lifecycle systems and make tenant scoping harder to
-reason about.
+We avoid a global soft-delete filter because it competes with status enums and makes
+organization scoping harder to reason about.

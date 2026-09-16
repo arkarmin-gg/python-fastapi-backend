@@ -1,70 +1,91 @@
 # python-fastapi-backend
 
 A FastAPI/SQLAlchemy/Postgres starter for a multi-tenant backend. It ships the
-foundation layer only: tenant identity, tenant-scoped users, RBAC, auth, and audit
-logging. There is no business domain on top of it yet — that's for whatever you build
-next.
+foundation layer only: global user identity, organizations, memberships, RBAC,
+auth (sessions + refresh rotation), and audit logging. There is no business domain
+on top of it yet — that's for whatever you build next.
 
-RBAC includes explicit assignment lifecycles for Role Permission and User Role rows in
-addition to replacement-style role/user updates.
+Source of truth for the schema: `database.dbml`.
+
+Core security rule:
+
+```text
+Identity ≠ Membership ≠ Authorization
+```
+
+A user may belong to multiple organizations with different roles and permissions
+in each organization.
 
 ## Language
 
 This section is a domain-language glossary: the vocabulary this codebase uses
 consistently, and the terms to avoid so two people (or an agent and a person) don't end
 up meaning different things by the same word. Keep it in sync as you add real domain
-concepts — when you introduce a new entity, add a short paragraph here with its
-definition and an `_Avoid_` line for near-synonyms that would blur the term.
+concepts.
+
+### Identity
+
+**User**:
+A global authentication identity (not owned by one organization). Login uses email or
+phone + password. Organization context is chosen via membership, not by storing
+`organization_id` on the user row.
+_Avoid_: tenant user, admin account
 
 ### Tenancy
 
-**Tenant**:
-An organization or account using the system. Tenant-owned data carries `tenant_id`,
-and authenticated requests derive tenant context from the JWT rather than from client
-query parameters.
-_Avoid_: organization, workspace, account
+**Organization**:
+A tenant/workspace/company boundary for organization-owned resources. Organization-owned
+data carries `organization_id`.
+_Avoid_: tenant (legacy name in older code), workspace, account — prefer **Organization**
+in APIs and docs; "tenant" may appear only as informal shorthand.
 
-### People
-
-**User**:
-An authentication account inside a tenant, governed by tenant roles. Login accepts
-tenant code or tenant id, plus an email-or-phone identifier and password.
-_Avoid_: admin, member
+**Organization Membership**:
+The join between a global user and one organization (invited/active/suspended/…). Roles
+are assigned to memberships, not directly to users.
+_Avoid_: user_roles, tenant membership (when meaning this entity)
 
 ### Access Control
 
-**Role**:
-A tenant-scoped named bundle of permissions assigned to users. System roles can be seeded
-for baseline tenant ownership.
-_Avoid_: group, tier
-
 **Permission**:
-A global read-only catalog entry identified by a stable code such as `users.read` or
-`roles.update`. Permissions are granted to roles, never directly to users.
+A global read-only catalog entry identified by a stable code such as `users.read`.
+Permissions are granted to roles, never directly to users.
 _Avoid_: grant, privilege, scope
 
-**Role Permission**:
-A tenant-owned assignment row connecting one role to one global permission. It can be
-managed through role replacement payloads or explicit assign/revoke endpoints.
-_Avoid_: permission grant, scope mapping
+**Role Template**:
+A global platform default bundle of permissions used to seed organization roles.
+_Avoid_: system role (use Role with `is_system` inside an organization)
 
-**User Role**:
-A tenant-owned assignment row connecting one active user to one active role. It can be
-managed through user replacement payloads or explicit assign/revoke endpoints.
-_Avoid_: group membership, privilege assignment, direct permission
+**Role**:
+An organization-scoped named bundle of permissions. May reference a role template.
+_Avoid_: group, tier
+
+**Role Permission**:
+An organization-owned assignment connecting one role to one global permission.
+_Avoid_: permission grant
+
+**Membership Role**:
+An organization-owned assignment connecting one membership to one role.
+_Avoid_: user_roles, group membership
 
 ### Auth Credentials
 
+**User Session**:
+A global authenticated device/login session belonging to a user (not to one
+organization). The same session may access multiple organizations through memberships.
+_Avoid_: tenant session
+
 **Refresh Token**:
-A long-lived opaque credential held by a user, exchanged to mint new short-lived access
-tokens. Stored only as a hash in `user_refresh_tokens`, rotated on refresh, and revoked on
-logout or password change.
-_Avoid_: session, access token
+A rotating opaque credential tied to a session. Stored only as a hash; reuse detection
+should revoke the session/token family.
+_Avoid_: access token (short-lived JWT is separate)
+
+**Email Verification Token** / **Password Reset Token**:
+One-time hashed tokens for account lifecycle flows.
 
 ### Observability
 
 **Audit Log**:
-An append-only tenant-scoped record of a management or auth action. Audit rows reference
-the acting user when one exists and may capture before/after JSON state for changed
-entities.
+An append-only record of a management or auth action. May be organization-scoped or
+global (`organization_id` NULL). Captures actor user/membership snapshots and request
+trace fields when available.
 _Avoid_: activity log, history, change log

@@ -1,30 +1,31 @@
 import uuid
-from dataclasses import dataclass
 from typing import Annotated
 
-import jwt
 from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.config import settings
 from src.dependencies import DbSession
 from src.exceptions import InvalidToken
-from src.foundation_enums import UserStatus
+from src.foundation_enums import MembershipStatus, UserStatus
 from src.modules.auth import security
 from src.modules.auth.exceptions import InactiveUser
+from src.modules.memberships.models import OrganizationMembership
 from src.modules.users import service as user_service
 from src.modules.users.models import User
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_PREFIX}/auth/login",
-    scheme_name="Bearer",
-)
+_bearer = HTTPBearer(auto_error=False)
 
 
-@dataclass(frozen=True)
 class CurrentUserContext:
-    user: User
-    tenant_id: uuid.UUID
+    def __init__(
+        self,
+        user: User,
+        organization_id: uuid.UUID,
+        membership_id: uuid.UUID,
+    ) -> None:
+        self.user = user
+        self.organization_id = organization_id
+        self.membership_id = membership_id
 
     @property
     def user_id(self) -> uuid.UUID:
@@ -32,29 +33,42 @@ class CurrentUserContext:
 
 
 async def get_current_user_context(
-    token: Annotated[str, Depends(oauth2_scheme)],
     db: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> CurrentUserContext:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise InvalidToken()
+    token = credentials.credentials
     try:
         payload = security.decode_access_token(token)
-    except jwt.InvalidTokenError as exc:
-        raise InvalidToken() from exc
-
-    if payload.get("type") != "access":
-        raise InvalidToken()
-
-    try:
+        if payload.get("type") != "access":
+            raise InvalidToken()
         user_id = uuid.UUID(str(payload["sub"]))
-        tenant_id = uuid.UUID(str(payload["tenant_id"]))
-    except (KeyError, ValueError) as exc:
+        organization_id = uuid.UUID(str(payload["organization_id"]))
+        membership_id = uuid.UUID(str(payload["membership_id"]))
+    except Exception as exc:
         raise InvalidToken() from exc
 
-    user = await user_service.get_by_id(db, tenant_id, user_id)
+    user = await user_service.get_by_id(db, user_id)
     if user is None:
         raise InvalidToken()
     if user.status != UserStatus.ACTIVE:
         raise InactiveUser()
-    return CurrentUserContext(user=user, tenant_id=tenant_id)
+
+    membership = await db.get(OrganizationMembership, membership_id)
+    if (
+        membership is None
+        or membership.user_id != user.id
+        or membership.organization_id != organization_id
+        or membership.status != MembershipStatus.ACTIVE
+    ):
+        raise InvalidToken()
+
+    return CurrentUserContext(
+        user=user,
+        organization_id=organization_id,
+        membership_id=membership_id,
+    )
 
 
 CurrentUser = Annotated[CurrentUserContext, Depends(get_current_user_context)]

@@ -23,14 +23,14 @@ class RolePermissionNotFound(NotFoundError):
     detail = "Role permission assignment not found."
 
 
-class UserRoleNotFound(NotFoundError):
+class MembershipRoleNotFound(NotFoundError):
     error_code = "user_role_not_found"
-    detail = "User role assignment not found."
+    detail = "Membership role assignment not found."
 
 
 class RoleCodeConflict(ConflictError):
     error_code = "role_code_conflict"
-    detail = "A role with this code already exists for the tenant."
+    detail = "A role with this code already exists for the organization."
 
 
 class RolePermissionConflict(ConflictError):
@@ -38,9 +38,9 @@ class RolePermissionConflict(ConflictError):
     detail = "This permission is already assigned to the role."
 
 
-class UserRoleConflict(ConflictError):
+class MembershipRoleConflict(ConflictError):
     error_code = "user_role_conflict"
-    detail = "This role is already assigned to the user."
+    detail = "This role is already assigned to the membership."
 
 
 class InvalidPermission(AppException):
@@ -52,13 +52,13 @@ class InvalidPermission(AppException):
 class InvalidRole(AppException):
     status_code = status.HTTP_400_BAD_REQUEST
     error_code = "invalid_role"
-    detail = "Role must be active and belong to the tenant."
+    detail = "Role must be active and belong to the organization."
 
 
 class InvalidUser(AppException):
     status_code = status.HTTP_400_BAD_REQUEST
     error_code = "invalid_user"
-    detail = "User must be active and belong to the tenant."
+    detail = "Membership must be active in this organization."
 
 
 class ProtectedRole(AppException):
@@ -70,4 +70,4 @@ class ProtectedRole(AppException):
 class RoleAssigned(AppException):
     status_code = status.HTTP_400_BAD_REQUEST
     error_code = "role_assigned"
-    detail = "Role is assigned to at least one active user."
+    detail = "Role is assigned to at least one active membership."
