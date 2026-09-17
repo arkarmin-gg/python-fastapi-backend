@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,11 @@ class UserSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     refresh_tokens = relationship("UserRefreshToken", back_populates="session")
 
     __table_args__ = (
+        CheckConstraint("expires_at > created_at", name="expires_after_created"),
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="revoked_after_created",
+        ),
         Index("user_sessions_user_id_idx", "user_id"),
         Index("user_sessions_user_revoked_at_idx", "user_id", "revoked_at"),
         Index("user_sessions_expires_at_idx", "expires_at"),
@@ -61,6 +66,12 @@ class UserRefreshToken(UUIDPrimaryKeyMixin, Base):
     session = relationship("UserSession", back_populates="refresh_tokens")
 
     __table_args__ = (
+        CheckConstraint("expires_at > created_at", name="expires_after_created"),
+        CheckConstraint("used_at IS NULL OR used_at >= created_at", name="used_after_created"),
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="revoked_after_created",
+        ),
         Index("user_refresh_tokens_session_id_idx", "session_id"),
         Index("user_refresh_tokens_user_id_idx", "user_id"),
         Index("user_refresh_tokens_session_revoked_at_idx", "session_id", "revoked_at"),
@@ -83,6 +94,11 @@ class UserEmailVerificationToken(UUIDPrimaryKeyMixin, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+    __table_args__ = (
+        Index("user_email_verification_tokens_user_id_idx", "user_id"),
+        Index("user_email_verification_tokens_expires_at_idx", "expires_at"),
+    )
+
 
 class UserPasswordResetToken(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "user_password_reset_tokens"
@@ -95,4 +111,9 @@ class UserPasswordResetToken(UUIDPrimaryKeyMixin, Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("user_password_reset_tokens_user_id_idx", "user_id"),
+        Index("user_password_reset_tokens_expires_at_idx", "expires_at"),
     )

@@ -1,8 +1,8 @@
-"""
+"""aligned foundation baseline
 
-Revision ID: 12f0646f526e
-Revises: 
-Create Date: 2026-09-16 23:33:49.866722
+Revision ID: f04a0b596833
+Revises:
+Create Date: 2026-09-17 07:51:20.656990
 
 """
 from collections.abc import Sequence
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '12f0646f526e'
+revision: str = 'f04a0b596833'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -29,6 +29,9 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("status IN ('active', 'suspended', 'inactive', 'pending_deletion', 'deleted')", name=op.f('organizations_status_valid_check')),
+    sa.CheckConstraint('char_length(trim(code)) > 0', name=op.f('organizations_code_not_blank_check')),
+    sa.CheckConstraint('char_length(trim(name)) > 0', name=op.f('organizations_name_not_blank_check')),
     sa.PrimaryKeyConstraint('id', name=op.f('organizations_pkey')),
     sa.UniqueConstraint('code', name=op.f('organizations_code_key'))
     )
@@ -48,17 +51,6 @@ def upgrade() -> None:
     )
     op.create_index('permissions_module_idx', 'permissions', ['module'], unique=False)
     op.create_index('permissions_module_is_active_idx', 'permissions', ['module', 'is_active'], unique=False)
-    op.create_table('role_templates',
-    sa.Column('code', sa.String(length=80), nullable=False),
-    sa.Column('name', sa.String(length=120), nullable=False),
-    sa.Column('description', sa.Text(), nullable=True),
-    sa.Column('is_active', sa.Boolean(), server_default='true', nullable=False),
-    sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.PrimaryKeyConstraint('id', name=op.f('role_templates_pkey')),
-    sa.UniqueConstraint('code', name=op.f('role_templates_code_key'))
-    )
     op.create_table('users',
     sa.Column('name', sa.String(length=200), nullable=False),
     sa.Column('email', sa.String(length=255), nullable=True),
@@ -75,9 +67,14 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("status IN ('active', 'inactive', 'locked', 'disabled', 'deleted')", name=op.f('users_status_valid_check')),
+    sa.CheckConstraint('char_length(trim(name)) > 0', name=op.f('users_name_not_blank_check')),
     sa.PrimaryKeyConstraint('id', name=op.f('users_pkey'))
     )
+    op.create_index('users_created_at_idx', 'users', ['created_at'], unique=False)
     op.create_index('users_deleted_at_idx', 'users', ['deleted_at'], unique=False)
+    op.create_index('users_email_lower_key', 'users', [sa.text('lower(email)')], unique=True, postgresql_where=sa.text('deleted_at IS NULL'))
+    op.create_index('users_phone_key', 'users', ['phone'], unique=True, postgresql_where=sa.text('deleted_at IS NULL'))
     op.create_index('users_status_idx', 'users', ['status'], unique=False)
     op.create_table('organization_memberships',
     sa.Column('organization_id', sa.Uuid(), nullable=False),
@@ -92,28 +89,18 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("status IN ('invited', 'active', 'suspended', 'inactive', 'removed')", name=op.f('organization_memberships_status_valid_check')),
     sa.ForeignKeyConstraint(['invited_by_membership_id'], ['organization_memberships.id'], name=op.f('organization_memberships_invited_by_membership_id_fkey'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('organization_memberships_organization_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('organization_memberships_user_id_fkey'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('organization_memberships_organization_id_fkey'), ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('organization_memberships_user_id_fkey'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('organization_memberships_pkey')),
     sa.UniqueConstraint('organization_id', 'id', name='organization_memberships_org_id_id_key'),
     sa.UniqueConstraint('organization_id', 'user_id', name='organization_memberships_org_user_key')
     )
     op.create_index('organization_memberships_org_status_idx', 'organization_memberships', ['organization_id', 'status'], unique=False)
     op.create_index('organization_memberships_user_id_idx', 'organization_memberships', ['user_id'], unique=False)
-    op.create_table('role_template_permissions',
-    sa.Column('role_template_id', sa.Uuid(), nullable=False),
-    sa.Column('permission_id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.ForeignKeyConstraint(['permission_id'], ['permissions.id'], name=op.f('role_template_permissions_permission_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['role_template_id'], ['role_templates.id'], name=op.f('role_template_permissions_role_template_id_fkey'), ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id', name=op.f('role_template_permissions_pkey')),
-    sa.UniqueConstraint('role_template_id', 'permission_id', name='role_template_permissions_template_permission_key')
-    )
     op.create_table('roles',
     sa.Column('organization_id', sa.Uuid(), nullable=False),
-    sa.Column('template_id', sa.Uuid(), nullable=True),
     sa.Column('code', sa.String(length=80), nullable=False),
     sa.Column('name', sa.String(length=120), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
@@ -122,14 +109,12 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('roles_organization_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['template_id'], ['role_templates.id'], name=op.f('roles_template_id_fkey'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('roles_organization_id_fkey'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('roles_pkey')),
     sa.UniqueConstraint('organization_id', 'code', name='roles_org_code_key'),
     sa.UniqueConstraint('organization_id', 'id', name='roles_org_id_id_key')
     )
     op.create_index('roles_org_is_active_idx', 'roles', ['organization_id', 'is_active'], unique=False)
-    op.create_index('roles_template_id_idx', 'roles', ['template_id'], unique=False)
     op.create_table('user_email_verification_tokens',
     sa.Column('user_id', sa.Uuid(), nullable=False),
     sa.Column('email_normalized', sa.String(length=255), nullable=False),
@@ -142,6 +127,8 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id', name=op.f('user_email_verification_tokens_pkey')),
     sa.UniqueConstraint('token_hash', name=op.f('user_email_verification_tokens_token_hash_key'))
     )
+    op.create_index('user_email_verification_tokens_expires_at_idx', 'user_email_verification_tokens', ['expires_at'], unique=False)
+    op.create_index('user_email_verification_tokens_user_id_idx', 'user_email_verification_tokens', ['user_id'], unique=False)
     op.create_table('user_password_reset_tokens',
     sa.Column('user_id', sa.Uuid(), nullable=False),
     sa.Column('token_hash', sa.String(length=500), nullable=False),
@@ -153,6 +140,8 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id', name=op.f('user_password_reset_tokens_pkey')),
     sa.UniqueConstraint('token_hash', name=op.f('user_password_reset_tokens_token_hash_key'))
     )
+    op.create_index('user_password_reset_tokens_expires_at_idx', 'user_password_reset_tokens', ['expires_at'], unique=False)
+    op.create_index('user_password_reset_tokens_user_id_idx', 'user_password_reset_tokens', ['user_id'], unique=False)
     op.create_table('user_sessions',
     sa.Column('user_id', sa.Uuid(), nullable=False),
     sa.Column('session_key_hash', sa.String(length=500), nullable=True),
@@ -166,6 +155,8 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint('expires_at > created_at', name=op.f('user_sessions_expires_after_created_check')),
+    sa.CheckConstraint('revoked_at IS NULL OR revoked_at >= created_at', name=op.f('user_sessions_revoked_after_created_check')),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('user_sessions_user_id_fkey'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('user_sessions_pkey'))
     )
@@ -191,15 +182,39 @@ def upgrade() -> None:
     sa.Column('user_agent', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+    sa.CheckConstraint("actor_type IN ('user', 'system', 'service', 'api_key')", name=op.f('audit_logs_actor_type_valid_check')),
     sa.ForeignKeyConstraint(['actor_membership_id'], ['organization_memberships.id'], name=op.f('audit_logs_actor_membership_id_fkey'), ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['actor_user_id'], ['users.id'], name=op.f('audit_logs_actor_user_id_fkey'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('audit_logs_organization_id_fkey'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('audit_logs_organization_id_fkey'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('audit_logs_pkey'))
     )
+    op.create_index('audit_logs_actor_user_id_idx', 'audit_logs', ['actor_user_id'], unique=False)
+    op.create_index('audit_logs_org_action_created_at_idx', 'audit_logs', ['organization_id', 'action', 'created_at'], unique=False)
     op.create_index('audit_logs_org_created_at_idx', 'audit_logs', ['organization_id', 'created_at'], unique=False)
     op.create_index('audit_logs_org_entity_idx', 'audit_logs', ['organization_id', 'entity_type', 'entity_id'], unique=False)
     op.create_index('audit_logs_org_membership_created_at_idx', 'audit_logs', ['organization_id', 'actor_membership_id', 'created_at'], unique=False)
     op.create_index('audit_logs_org_user_created_at_idx', 'audit_logs', ['organization_id', 'actor_user_id', 'created_at'], unique=False)
+    op.create_index('audit_logs_request_id_idx', 'audit_logs', ['request_id'], unique=False)
+    op.create_index('audit_logs_trace_id_idx', 'audit_logs', ['trace_id'], unique=False)
+    op.execute(
+        """
+        CREATE FUNCTION prevent_audit_log_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            RAISE EXCEPTION 'audit_logs is append-only';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER audit_logs_append_only
+        BEFORE UPDATE OR DELETE ON audit_logs
+        FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation()
+        """
+    )
     op.create_table('membership_roles',
     sa.Column('organization_id', sa.Uuid(), nullable=False),
     sa.Column('membership_id', sa.Uuid(), nullable=False),
@@ -208,15 +223,17 @@ def upgrade() -> None:
     sa.Column('assigned_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.ForeignKeyConstraint(['assigned_by_membership_id'], ['organization_memberships.id'], name=op.f('membership_roles_assigned_by_membership_id_fkey'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['membership_id'], ['organization_memberships.id'], name=op.f('membership_roles_membership_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('membership_roles_organization_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['role_id'], ['roles.id'], name=op.f('membership_roles_role_id_fkey'), ondelete='CASCADE'),
+    sa.CheckConstraint('expires_at IS NULL OR expires_at > assigned_at', name=op.f('membership_roles_expires_after_assigned_check')),
+    sa.ForeignKeyConstraint(['organization_id', 'assigned_by_membership_id'], ['organization_memberships.organization_id', 'organization_memberships.id'], name='membership_roles_org_assigned_by_membership_fkey', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['organization_id', 'membership_id'], ['organization_memberships.organization_id', 'organization_memberships.id'], name='membership_roles_org_membership_fkey', ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['organization_id', 'role_id'], ['roles.organization_id', 'roles.id'], name='membership_roles_org_role_fkey', ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('membership_roles_organization_id_fkey'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('membership_roles_pkey')),
     sa.UniqueConstraint('organization_id', 'membership_id', 'role_id', name='membership_roles_org_membership_role_key')
     )
-    op.create_index('membership_roles_org_membership_id_idx', 'membership_roles', ['organization_id', 'membership_id'], unique=False)
-    op.create_index('membership_roles_org_role_id_idx', 'membership_roles', ['organization_id', 'role_id'], unique=False)
+    op.create_index('membership_roles_org_expires_at_idx', 'membership_roles', ['organization_id', 'expires_at'], unique=False)
+    op.create_index('membership_roles_org_membership_idx', 'membership_roles', ['organization_id', 'membership_id'], unique=False)
+    op.create_index('membership_roles_org_role_idx', 'membership_roles', ['organization_id', 'role_id'], unique=False)
     op.create_table('role_permissions',
     sa.Column('organization_id', sa.Uuid(), nullable=False),
     sa.Column('role_id', sa.Uuid(), nullable=False),
@@ -224,15 +241,15 @@ def upgrade() -> None:
     sa.Column('granted_by_membership_id', sa.Uuid(), nullable=True),
     sa.Column('granted_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.ForeignKeyConstraint(['granted_by_membership_id'], ['organization_memberships.id'], name=op.f('role_permissions_granted_by_membership_id_fkey'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('role_permissions_organization_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['permission_id'], ['permissions.id'], name=op.f('role_permissions_permission_id_fkey'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['role_id'], ['roles.id'], name=op.f('role_permissions_role_id_fkey'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['organization_id', 'granted_by_membership_id'], ['organization_memberships.organization_id', 'organization_memberships.id'], name='role_permissions_org_granted_by_membership_fkey', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['organization_id', 'role_id'], ['roles.organization_id', 'roles.id'], name='role_permissions_org_role_fkey', ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('role_permissions_organization_id_fkey'), ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['permission_id'], ['permissions.id'], name=op.f('role_permissions_permission_id_fkey'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('role_permissions_pkey')),
     sa.UniqueConstraint('organization_id', 'role_id', 'permission_id', name='role_permissions_org_role_permission_key')
     )
-    op.create_index('role_permissions_org_permission_id_idx', 'role_permissions', ['organization_id', 'permission_id'], unique=False)
-    op.create_index('role_permissions_org_role_id_idx', 'role_permissions', ['organization_id', 'role_id'], unique=False)
+    op.create_index('role_permissions_org_permission_idx', 'role_permissions', ['organization_id', 'permission_id'], unique=False)
+    op.create_index('role_permissions_org_role_idx', 'role_permissions', ['organization_id', 'role_id'], unique=False)
     op.create_table('user_refresh_tokens',
     sa.Column('user_id', sa.Uuid(), nullable=False),
     sa.Column('session_id', sa.Uuid(), nullable=False),
@@ -245,6 +262,9 @@ def upgrade() -> None:
     sa.Column('revoke_reason', sa.String(length=200), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+    sa.CheckConstraint('expires_at > created_at', name=op.f('user_refresh_tokens_expires_after_created_check')),
+    sa.CheckConstraint('revoked_at IS NULL OR revoked_at >= created_at', name=op.f('user_refresh_tokens_revoked_after_created_check')),
+    sa.CheckConstraint('used_at IS NULL OR used_at >= created_at', name=op.f('user_refresh_tokens_used_after_created_check')),
     sa.ForeignKeyConstraint(['parent_token_id'], ['user_refresh_tokens.id'], name=op.f('user_refresh_tokens_parent_token_id_fkey'), ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['replaced_by_token_id'], ['user_refresh_tokens.id'], name=op.f('user_refresh_tokens_replaced_by_token_id_fkey'), ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['session_id'], ['user_sessions.id'], name=op.f('user_refresh_tokens_session_id_fkey'), ondelete='CASCADE'),
@@ -262,40 +282,51 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
+    op.execute("DROP TRIGGER IF EXISTS audit_logs_append_only ON audit_logs")
+    op.execute("DROP FUNCTION IF EXISTS prevent_audit_log_mutation()")
     op.drop_index('user_refresh_tokens_user_id_idx', table_name='user_refresh_tokens')
     op.drop_index('user_refresh_tokens_session_revoked_at_idx', table_name='user_refresh_tokens')
     op.drop_index('user_refresh_tokens_session_id_idx', table_name='user_refresh_tokens')
     op.drop_index('user_refresh_tokens_parent_token_id_idx', table_name='user_refresh_tokens')
     op.drop_index('user_refresh_tokens_expires_at_idx', table_name='user_refresh_tokens')
     op.drop_table('user_refresh_tokens')
-    op.drop_index('role_permissions_org_role_id_idx', table_name='role_permissions')
-    op.drop_index('role_permissions_org_permission_id_idx', table_name='role_permissions')
+    op.drop_index('role_permissions_org_role_idx', table_name='role_permissions')
+    op.drop_index('role_permissions_org_permission_idx', table_name='role_permissions')
     op.drop_table('role_permissions')
-    op.drop_index('membership_roles_org_role_id_idx', table_name='membership_roles')
-    op.drop_index('membership_roles_org_membership_id_idx', table_name='membership_roles')
+    op.drop_index('membership_roles_org_role_idx', table_name='membership_roles')
+    op.drop_index('membership_roles_org_membership_idx', table_name='membership_roles')
+    op.drop_index('membership_roles_org_expires_at_idx', table_name='membership_roles')
     op.drop_table('membership_roles')
+    op.drop_index('audit_logs_trace_id_idx', table_name='audit_logs')
+    op.drop_index('audit_logs_request_id_idx', table_name='audit_logs')
     op.drop_index('audit_logs_org_user_created_at_idx', table_name='audit_logs')
     op.drop_index('audit_logs_org_membership_created_at_idx', table_name='audit_logs')
     op.drop_index('audit_logs_org_entity_idx', table_name='audit_logs')
     op.drop_index('audit_logs_org_created_at_idx', table_name='audit_logs')
+    op.drop_index('audit_logs_org_action_created_at_idx', table_name='audit_logs')
+    op.drop_index('audit_logs_actor_user_id_idx', table_name='audit_logs')
     op.drop_table('audit_logs')
     op.drop_index('user_sessions_user_revoked_at_idx', table_name='user_sessions')
     op.drop_index('user_sessions_user_id_idx', table_name='user_sessions')
     op.drop_index('user_sessions_expires_at_idx', table_name='user_sessions')
     op.drop_table('user_sessions')
+    op.drop_index('user_password_reset_tokens_user_id_idx', table_name='user_password_reset_tokens')
+    op.drop_index('user_password_reset_tokens_expires_at_idx', table_name='user_password_reset_tokens')
     op.drop_table('user_password_reset_tokens')
+    op.drop_index('user_email_verification_tokens_user_id_idx', table_name='user_email_verification_tokens')
+    op.drop_index('user_email_verification_tokens_expires_at_idx', table_name='user_email_verification_tokens')
     op.drop_table('user_email_verification_tokens')
-    op.drop_index('roles_template_id_idx', table_name='roles')
     op.drop_index('roles_org_is_active_idx', table_name='roles')
     op.drop_table('roles')
-    op.drop_table('role_template_permissions')
     op.drop_index('organization_memberships_user_id_idx', table_name='organization_memberships')
     op.drop_index('organization_memberships_org_status_idx', table_name='organization_memberships')
     op.drop_table('organization_memberships')
     op.drop_index('users_status_idx', table_name='users')
+    op.drop_index('users_phone_key', table_name='users')
+    op.drop_index('users_email_lower_key', table_name='users')
     op.drop_index('users_deleted_at_idx', table_name='users')
+    op.drop_index('users_created_at_idx', table_name='users')
     op.drop_table('users')
-    op.drop_table('role_templates')
     op.drop_index('permissions_module_is_active_idx', table_name='permissions')
     op.drop_index('permissions_module_idx', table_name='permissions')
     op.drop_table('permissions')

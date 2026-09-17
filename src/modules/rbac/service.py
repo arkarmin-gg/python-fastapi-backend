@@ -1,7 +1,8 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -71,10 +72,16 @@ async def user_has_permission(
             OrganizationMembership.id == membership_id,
             OrganizationMembership.organization_id == organization_id,
             OrganizationMembership.user_id == user.id,
+            RolePermission.organization_id == organization_id,
+            MembershipRole.organization_id == organization_id,
             Permission.code == permission_code,
             Permission.is_active.is_(True),
             Role.is_active.is_(True),
             Role.organization_id == organization_id,
+            or_(
+                MembershipRole.expires_at.is_(None),
+                MembershipRole.expires_at > datetime.now(UTC),
+            ),
         )
         .limit(1)
     )
@@ -133,7 +140,11 @@ async def create_role_permission(
     await _ensure_active_role(db, organization_id, data.role_id)
     await _ensure_permission(db, data.permission_id)
     await _ensure_role_permission_available(db, organization_id, data.role_id, data.permission_id)
-    link = RolePermission(organization_id=organization_id, **data.model_dump())
+    link = RolePermission(
+        organization_id=organization_id,
+        granted_by_membership_id=actor_membership_id,
+        **data.model_dump(),
+    )
     db.add(link)
     await db.flush()
     await record_audit_log(
@@ -223,7 +234,11 @@ async def create_membership_role(
     await _ensure_active_membership(db, organization_id, data.membership_id)
     await _ensure_active_role(db, organization_id, data.role_id)
     await _ensure_membership_role_available(db, organization_id, data.membership_id, data.role_id)
-    link = MembershipRole(organization_id=organization_id, **data.model_dump())
+    link = MembershipRole(
+        organization_id=organization_id,
+        assigned_by_membership_id=actor_membership_id,
+        **data.model_dump(),
+    )
     db.add(link)
     await db.flush()
     await record_audit_log(
@@ -315,7 +330,12 @@ async def create_role(
     )
     db.add(role)
     await db.flush()
-    await _replace_permissions(db, role, data.permission_ids)
+    await _replace_permissions(
+        db,
+        role,
+        data.permission_ids,
+        actor_membership_id=actor_membership_id,
+    )
     await db.flush()
     await record_audit_log(
         db,
@@ -356,7 +376,12 @@ async def update_role(
         setattr(role, key, value)
     if data.permission_ids is not None:
         await _ensure_permissions(db, data.permission_ids)
-        await _replace_permissions(db, role, data.permission_ids)
+        await _replace_permissions(
+            db,
+            role,
+            data.permission_ids,
+            actor_membership_id=actor_membership_id,
+        )
     await db.flush()
     await record_audit_log(
         db,
@@ -402,6 +427,7 @@ async def deactivate_role(
         role_id,
         RoleUpdate(is_active=False),
         actor_user_id=actor_user_id,
+        actor_membership_id=actor_membership_id,
     )
 
 
@@ -424,19 +450,29 @@ async def _ensure_permissions(db: AsyncSession, permission_ids: list[uuid.UUID])
     if not unique_permission_ids:
         return
     found = await db.scalar(
-        select(func.count(Permission.id)).where(Permission.id.in_(unique_permission_ids))
+        select(func.count(Permission.id)).where(
+            Permission.id.in_(unique_permission_ids),
+            Permission.is_active.is_(True),
+        )
     )
     if found != len(unique_permission_ids):
         raise InvalidPermission()
 
 
 async def _replace_permissions(
-    db: AsyncSession, role: Role, permission_ids: list[uuid.UUID]
+    db: AsyncSession,
+    role: Role,
+    permission_ids: list[uuid.UUID],
+    *,
+    actor_membership_id: uuid.UUID | None,
 ) -> None:
     await db.refresh(role, attribute_names=["permission_links"])
     role.permission_links = [
         RolePermission(
-            organization_id=role.organization_id, role_id=role.id, permission_id=permission_id
+            organization_id=role.organization_id,
+            role_id=role.id,
+            permission_id=permission_id,
+            granted_by_membership_id=actor_membership_id,
         )
         for permission_id in set(permission_ids)
     ]
@@ -507,7 +543,12 @@ async def _ensure_active_membership(
 
 
 async def _ensure_permission(db: AsyncSession, permission_id: uuid.UUID) -> Permission:
-    permission = await db.scalar(select(Permission).where(Permission.id == permission_id))
+    permission = await db.scalar(
+        select(Permission).where(
+            Permission.id == permission_id,
+            Permission.is_active.is_(True),
+        )
+    )
     if permission is None:
         raise InvalidPermission()
     return permission

@@ -209,6 +209,10 @@ Table users {
 
     If soft-deleted identifiers should become reusable, replace the normal
     unique constraints with partial unique indexes where deleted_at IS NULL.
+
+    The baseline migration enforces a partial unique index on lower(email)
+    and a partial unique index on phone where deleted_at IS NULL. DBML cannot
+    express these PostgreSQL expression/partial indexes precisely.
   '''
 }
 
@@ -477,9 +481,6 @@ Table roles {
     Organization-scoped permission bundle.
 
     Organizations may define custom roles independently.
-
-    Role templates provide platform defaults without forcing every
-    organization to share the exact same mutable role configuration.
   '''
 }
 
@@ -1108,12 +1109,12 @@ Ref: organization_memberships.(organization_id, id)
 
 Ref: organization_memberships.(organization_id, id)
   < membership_roles.(organization_id, assigned_by_membership_id) [
-  delete: set null
+  delete: restrict
 ]
 
 Ref: organization_memberships.(organization_id, id)
   < role_permissions.(organization_id, granted_by_membership_id) [
-  delete: set null
+  delete: restrict
 ]
 
 Ref: organization_memberships.id

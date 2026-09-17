@@ -7,6 +7,7 @@ The current API keeps foundation resources directly under `/api/v1`:
 
 - `/api/v1/auth`
 - `/api/v1/organizations`
+- `/api/v1/memberships`
 - `/api/v1/users`
 - `/api/v1/roles`
 - `/api/v1/permissions`
@@ -15,6 +16,10 @@ The current API keeps foundation resources directly under `/api/v1`:
 Protected routes use organization membership auth. Access tokens carry `sub` (user id),
 `organization_id`, and `membership_id`; route dependencies derive organization context
 from the token. Clients do not choose an organization namespace in the path.
+
+`/users` exposes identities only through the active organization membership boundary.
+Self-service global identity changes live under `/auth/me`; administrators change a
+person's organization access through `/memberships`.
 
 We use one versioned foundation API because this slice has one current authenticated
 audience: organization members operating management resources. Reintroduce separate audience

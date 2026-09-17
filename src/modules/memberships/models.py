@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.foundation_enums import MembershipStatus
@@ -14,10 +14,10 @@ class OrganizationMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "organization_memberships"
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[MembershipStatus] = str_enum_column(
         MembershipStatus,
@@ -40,9 +40,14 @@ class OrganizationMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "MembershipRole",
         back_populates="membership",
         foreign_keys="MembershipRole.membership_id",
+        overlaps="membership_links,role",
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('invited', 'active', 'suspended', 'inactive', 'removed')",
+            name="status_valid",
+        ),
         UniqueConstraint("organization_id", "id", name="organization_memberships_org_id_id_key"),
         UniqueConstraint(
             "organization_id", "user_id", name="organization_memberships_org_user_key"

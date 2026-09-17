@@ -20,7 +20,6 @@ from src.modules.users.schemas import (
     UserFilters,
     UserListResponse,
     UserRead,
-    UserUpdate,
     user_filters,
 )
 from src.pagination import PaginationParams, pagination_params
@@ -62,7 +61,13 @@ async def list_users(
     responses=error_responses(*AUTH_ERRORS, UserIdentifierConflict, InvalidRole),
 )
 async def create_user(db: DbSession, current: CurrentUser, body: UserCreate):
-    return await service.create(db, current.organization_id, body, actor_user_id=current.user_id)
+    return await service.create(
+        db,
+        current.organization_id,
+        body,
+        actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
+    )
 
 
 @router.get(
@@ -72,30 +77,8 @@ async def create_user(db: DbSession, current: CurrentUser, body: UserCreate):
     responses=error_responses(*AUTH_ERRORS, UserNotFound),
 )
 async def get_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID):
-    user = await service.get_by_id(db, current.organization_id, user_id)
+    user = await service.get_scoped_by_id(db, current.organization_id, user_id)
     if user is None:
         raise UserNotFound()
+    await service.attach_permission_codes(db, [user], organization_id=current.organization_id)
     return user
-
-
-@router.patch(
-    "/{user_id}",
-    response_model=UserRead,
-    dependencies=[Depends(require_permission("users.update"))],
-    responses=error_responses(*AUTH_ERRORS, UserNotFound, UserIdentifierConflict, InvalidRole),
-)
-async def update_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID, body: UserUpdate):
-    return await service.update(
-        db, current.organization_id, user_id, body, actor_user_id=current.user_id
-    )
-
-
-@router.delete(
-    "/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_model=None,
-    dependencies=[Depends(require_permission("users.delete"))],
-    responses=error_responses(*AUTH_ERRORS, UserNotFound),
-)
-async def deactivate_user(db: DbSession, current: CurrentUser, user_id: uuid.UUID):
-    await service.deactivate(db, current.organization_id, user_id, actor_user_id=current.user_id)

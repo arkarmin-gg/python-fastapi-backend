@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 
 from src.dependencies import DbSession
 from src.exceptions import InvalidToken
@@ -10,7 +10,6 @@ from src.modules.auth.exceptions import InactiveUser
 from src.modules.organizations import service
 from src.modules.organizations.exceptions import OrganizationCodeConflict, OrganizationNotFound
 from src.modules.organizations.schemas import (
-    OrganizationCreate,
     OrganizationFilters,
     OrganizationListResponse,
     OrganizationRead,
@@ -42,27 +41,17 @@ def organization_sort(sort: Annotated[str | None, Query()] = None) -> tuple[Sort
 )
 async def list_organizations(
     db: DbSession,
+    current: CurrentUser,
     pagination: Annotated[PaginationParams, Depends(pagination_params)],
     filters: Annotated[OrganizationFilters, Depends(organization_filters)],
     sort: Annotated[tuple[SortSpec, ...], Depends(organization_sort)],
 ):
-    return await service.list_organizations(db, pagination, filters, sort)
-
-
-@router.post(
-    "",
-    response_model=OrganizationRead,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permission("organizations.create"))],
-    responses=error_responses(*AUTH_ERRORS, OrganizationCodeConflict),
-)
-async def create_organization(db: DbSession, current: CurrentUser, body: OrganizationCreate):
-    return await service.create(
+    return await service.list_organizations(
         db,
-        body,
-        actor_user_id=current.user_id,
-        actor_organization_id=current.organization_id,
-        actor_membership_id=current.membership_id,
+        current.organization_id,
+        pagination,
+        filters,
+        sort,
     )
 
 
@@ -72,8 +61,12 @@ async def create_organization(db: DbSession, current: CurrentUser, body: Organiz
     dependencies=[Depends(require_permission("organizations.read"))],
     responses=error_responses(*AUTH_ERRORS, OrganizationNotFound),
 )
-async def get_organization(db: DbSession, organization_id: uuid.UUID):
-    organization = await service.get_by_id(db, organization_id)
+async def get_organization(db: DbSession, current: CurrentUser, organization_id: uuid.UUID):
+    organization = await service.get_scoped_by_id(
+        db,
+        organization_id,
+        scope_organization_id=current.organization_id,
+    )
     if organization is None:
         raise OrganizationNotFound()
     return organization

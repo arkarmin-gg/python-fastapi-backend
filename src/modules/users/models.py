@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String
+from sqlalchemy import CheckConstraint, DateTime, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.foundation_enums import UserStatus
@@ -39,6 +39,24 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     memberships = relationship("OrganizationMembership", back_populates="user")
 
     __table_args__ = (
+        CheckConstraint("char_length(trim(name)) > 0", name="name_not_blank"),
+        CheckConstraint(
+            "status IN ('active', 'inactive', 'locked', 'disabled', 'deleted')",
+            name="status_valid",
+        ),
         Index("users_status_idx", "status"),
+        Index("users_created_at_idx", "created_at"),
         Index("users_deleted_at_idx", "deleted_at"),
+        Index(
+            "users_email_lower_key",
+            func.lower(email),
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "users_phone_key",
+            "phone",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )

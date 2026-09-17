@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 import src.registry  # noqa: F401  -- register every ORM model so all FKs resolve
 from src.api.routers import v1
 from src.config import Environment, settings
+from src.dependencies import get_request_context, reset_request_context, set_request_context
 from src.exceptions import AppException
 from src.schemas import ErrorResponse
 
@@ -18,6 +19,7 @@ SHOW_DOCS_IN = {Environment.LOCAL, Environment.STAGING}
 OPENAPI_TAGS = [
     {"name": "Auth", "description": "Organization membership authentication."},
     {"name": "Organizations", "description": "Organization/company management."},
+    {"name": "Memberships", "description": "Organization membership lifecycle."},
     {"name": "Users", "description": "Global user identity and org-scoped membership ops."},
     {
         "name": "RBAC",
@@ -52,10 +54,18 @@ def create_app() -> FastAPI:
 
     app = FastAPI(**app_kwargs)
 
+    @app.middleware("http")
+    async def _request_context(request: Request, call_next):
+        token = set_request_context(get_request_context(request))
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_context(token)
+
     app.add_middleware(
         cast(Any, CORSMiddleware),
         allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
+        allow_credentials="*" not in settings.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -7,7 +7,7 @@ help:
 	@echo "  make migrate         Apply migrations (alembic upgrade head)"
 	@echo "  make makemigration m=\"msg\"   Autogenerate a migration"
 	@echo "  make downgrade       Revert the last migration"
-	@echo "  make seed            Seed demo tenant + owner user"
+	@echo "  make seed            Seed demo organization + owner user"
 	@echo "  make clear-db        Clear all application data (requires confirm=yes)"
 	@echo "  make test            Run unit tests"
 	@echo "  make lint            Check lint + format (no changes)"

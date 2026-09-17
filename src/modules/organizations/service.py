@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Select, func, select
@@ -8,7 +9,6 @@ from src.modules.audit_logs.service import record_audit_log
 from src.modules.organizations.exceptions import OrganizationCodeConflict, OrganizationNotFound
 from src.modules.organizations.models import Organization
 from src.modules.organizations.schemas import (
-    OrganizationCreate,
     OrganizationFilters,
     OrganizationUpdate,
 )
@@ -27,48 +27,41 @@ async def get_by_id(db: AsyncSession, organization_id: uuid.UUID) -> Organizatio
     return await db.get(Organization, organization_id)
 
 
+async def get_scoped_by_id(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    *,
+    scope_organization_id: uuid.UUID,
+) -> Organization | None:
+    return await db.scalar(
+        select(Organization).where(
+            Organization.id == organization_id,
+            Organization.id == scope_organization_id,
+        )
+    )
+
+
 async def get_by_code(db: AsyncSession, code: str) -> Organization | None:
     return await db.scalar(select(Organization).where(Organization.code == code))
 
 
 async def list_organizations(
     db: AsyncSession,
+    organization_id: uuid.UUID,
     pagination: PaginationParams,
     filters: OrganizationFilters,
     sort: tuple[SortSpec, ...],
 ) -> Page[Organization]:
-    stmt = _apply_filters(select(Organization), filters)
-    stmt = apply_sort(stmt, sort, ORG_SORT_COLUMNS)
-    count_stmt = _apply_filters(select(func.count(Organization.id)), filters)
-    return await paginate(db, stmt, count_stmt, pagination)
-
-
-async def create(
-    db: AsyncSession,
-    data: OrganizationCreate,
-    *,
-    actor_user_id: uuid.UUID,
-    actor_organization_id: uuid.UUID | None,
-    actor_membership_id: uuid.UUID | None = None,
-) -> Organization:
-    if await get_by_code(db, data.code) is not None:
-        raise OrganizationCodeConflict()
-    organization = Organization(**data.model_dump())
-    db.add(organization)
-    await db.flush()
-    await record_audit_log(
-        db,
-        organization_id=actor_organization_id,
-        actor_user_id=actor_user_id,
-        actor_membership_id=actor_membership_id,
-        action="organizations.create",
-        entity_type="organization",
-        entity_id=organization.id,
-        after_json=_loggable(organization),
+    stmt = _apply_filters(
+        select(Organization).where(Organization.id == organization_id),
+        filters,
     )
-    await db.commit()
-    await db.refresh(organization)
-    return organization
+    stmt = apply_sort(stmt, sort, ORG_SORT_COLUMNS)
+    count_stmt = _apply_filters(
+        select(func.count(Organization.id)).where(Organization.id == organization_id),
+        filters,
+    )
+    return await paginate(db, stmt, count_stmt, pagination)
 
 
 async def update(
@@ -77,10 +70,14 @@ async def update(
     data: OrganizationUpdate,
     *,
     actor_user_id: uuid.UUID,
-    actor_organization_id: uuid.UUID | None,
+    actor_organization_id: uuid.UUID,
     actor_membership_id: uuid.UUID | None = None,
 ) -> Organization:
-    organization = await get_by_id(db, organization_id)
+    organization = await get_scoped_by_id(
+        db,
+        organization_id,
+        scope_organization_id=actor_organization_id,
+    )
     if organization is None:
         raise OrganizationNotFound()
     before = _loggable(organization)
@@ -90,6 +87,15 @@ async def update(
         raise OrganizationCodeConflict()
     for key, value in fields.items():
         setattr(organization, key, value)
+    now = datetime.now(UTC)
+    if "status" in fields:
+        if organization.status.value == "suspended":
+            organization.suspended_at = now
+        elif organization.status.value == "deleted":
+            organization.deleted_at = now
+        elif organization.status.value == "active":
+            organization.suspended_at = None
+            organization.deleted_at = None
     await db.flush()
     await record_audit_log(
         db,

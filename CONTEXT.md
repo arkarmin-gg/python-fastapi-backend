@@ -41,7 +41,9 @@ in APIs and docs; "tenant" may appear only as informal shorthand.
 
 **Organization Membership**:
 The join between a global user and one organization (invited/active/suspended/…). Roles
-are assigned to memberships, not directly to users.
+are assigned to memberships, not directly to users. Organization administrators manage
+access by inviting, activating, suspending, or removing memberships; they do not mutate
+the member's global identity.
 _Avoid_: user_roles, tenant membership (when meaning this entity)
 
 ### Access Control
@@ -51,12 +53,8 @@ A global read-only catalog entry identified by a stable code such as `users.read
 Permissions are granted to roles, never directly to users.
 _Avoid_: grant, privilege, scope
 
-**Role Template**:
-A global platform default bundle of permissions used to seed organization roles.
-_Avoid_: system role (use Role with `is_system` inside an organization)
-
 **Role**:
-An organization-scoped named bundle of permissions. May reference a role template.
+An organization-scoped named bundle of permissions.
 _Avoid_: group, tier
 
 **Role Permission**:
@@ -76,7 +74,8 @@ _Avoid_: tenant session
 
 **Refresh Token**:
 A rotating opaque credential tied to a session. Stored only as a hash; reuse detection
-should revoke the session/token family.
+revokes the session/token family. Each refresh selects an organization and proves the user
+still has an active membership there; a rotated token cannot outlive its session.
 _Avoid_: access token (short-lived JWT is separate)
 
 **Email Verification Token** / **Password Reset Token**:

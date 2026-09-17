@@ -42,11 +42,6 @@ def organization_filters(
     return build_query_model(OrganizationFilters, search=search, status=status)
 
 
-class OrganizationCreate(RequestSchema):
-    code: str = Field(min_length=1, max_length=80)
-    name: str = Field(min_length=1, max_length=200)
-
-
 class OrganizationUpdate(RequestSchema):
     code: str | None = Field(default=None, min_length=1, max_length=80)
     name: str | None = Field(default=None, min_length=1, max_length=200)

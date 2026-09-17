@@ -30,7 +30,6 @@ src/
 │   ├── memberships/    organization_memberships
 │   ├── users/          global user identity
 │   ├── rbac/           roles, permissions, role_permissions, membership_roles,
-│   │                   role_templates
 │   └── audit_logs/     organization-scoped audit trail
 ├── pagination.py
 └── query_filters.py
@@ -48,6 +47,7 @@ the app, Alembic, tests, and seed.
 ```bash
 uv sync
 cp .env.example .env
+# Set AUTH_JWT_SECRET in .env to a newly generated secret before starting the app.
 createdb <your-db-name>   # match DATABASE_URL in .env
 make migrate
 make seed
@@ -74,10 +74,13 @@ POST /api/v1/auth/login
 ```
 
 Use the returned bearer token for `/api/v1/organizations`, `/api/v1/users`,
-`/api/v1/roles`, `/api/v1/permissions`, `/api/v1/role-permissions`,
+`/api/v1/memberships`, `/api/v1/roles`, `/api/v1/permissions`, `/api/v1/role-permissions`,
 `/api/v1/membership-roles`, and `/api/v1/audit-logs`.
 
 Access tokens carry `sub` (user id), `organization_id`, and `membership_id`.
+Refresh requests must also select an organization by `organization_id` or
+`organization_code`; the service verifies an active membership before issuing a new
+organization-scoped access token.
 
 ## Make Targets
 
@@ -104,7 +107,14 @@ Access tokens carry `sub` (user id), `organization_id`, and `membership_id`.
   `deleted_at` timestamps where the schema defines them — not a global ORM soft-delete
   filter (see `docs/adr/0002-automatic-soft-delete-filter.md`).
 - Refresh tokens are opaque, stored hashed, rotated on use (with parent/reuse tracking),
-  and revoked on logout or password change. Sessions are first-class rows.
+  and revoked on logout or password change. Sessions are first-class rows, and refresh
+  token lifetime never exceeds the parent session lifetime.
+- `/users` is an organization-scoped management view. A user owns their global identity
+  changes through `/auth/me`; organization administrators manage access through
+  `/memberships` instead of mutating or deleting the global identity.
+- Audit logs are read-only through the API and enforced append-only by PostgreSQL triggers.
+  Request correlation, IP address, user agent, actor snapshots, and assignment provenance
+  are recorded where available.
 - RBAC role permissions and membership roles can be managed either through full role /
   membership replacement payloads or explicit assignment endpoints. Assignment endpoints
   validate active memberships/roles, reject duplicates, and audit assign/revoke actions.

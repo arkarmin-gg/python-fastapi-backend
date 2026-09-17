@@ -38,7 +38,12 @@ async def login(body: LoginRequest, db: DbSession) -> TokenResponse:
 
 @router.post("/refresh", response_model=TokenResponse, responses=error_responses(InvalidToken))
 async def refresh(body: RefreshRequest, db: DbSession) -> TokenResponse:
-    access_token, refresh_token = await service.rotate_refresh_token(db, body.refresh_token)
+    access_token, refresh_token = await service.rotate_refresh_token(
+        db,
+        body.refresh_token,
+        organization_id=body.organization_id,
+        organization_code=body.organization_code,
+    )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -49,7 +54,12 @@ async def refresh(body: RefreshRequest, db: DbSession) -> TokenResponse:
     responses=error_responses(*_AUTH_ERRORS),
 )
 async def logout(current: CurrentUser, db: DbSession) -> None:
-    await service.logout(db, current.user)
+    await service.logout(
+        db,
+        current.user,
+        organization_id=current.organization_id,
+        membership_id=current.membership_id,
+    )
 
 
 @router.get("/me", response_model=UserRead, responses=error_responses(*_AUTH_ERRORS))
@@ -81,4 +91,6 @@ async def change_my_password(
         current.user,
         current_password=body.current_password,
         new_password=body.new_password,
+        organization_id=current.organization_id,
+        membership_id=current.membership_id,
     )

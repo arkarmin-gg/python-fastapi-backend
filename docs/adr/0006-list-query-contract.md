@@ -22,6 +22,7 @@ pagination:
 This contract currently applies to organization-scoped management lists such as:
 
 - `GET /api/v1/organizations`
+- `GET /api/v1/memberships`
 - `GET /api/v1/users`
 - `GET /api/v1/roles`
 - `GET /api/v1/audit-logs`

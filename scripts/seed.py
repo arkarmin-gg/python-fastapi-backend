@@ -3,7 +3,7 @@ import os
 from datetime import UTC, datetime
 
 import src.registry  # noqa: F401
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import SessionFactory
 from src.foundation_enums import MembershipStatus, OrganizationStatus, UserStatus
@@ -14,7 +14,6 @@ from src.modules.rbac.constants import (
     FOUNDATION_PERMISSION_MODULES,
     MODULE_EXTRA_ACTIONS,
     OWNER_ROLE_CODE,
-    OWNER_TEMPLATE_CODE,
     ActionType,
     extra_permission_code,
     permission_code,
@@ -24,11 +23,8 @@ from src.modules.rbac.models import (
     Permission,
     Role,
     RolePermission,
-    RoleTemplate,
-    RoleTemplatePermission,
 )
 from src.modules.users.models import User
-from src.modules.users.normalize import normalize_email, normalize_phone
 
 
 async def _ensure_permissions(db: AsyncSession) -> list[Permission]:
@@ -63,39 +59,6 @@ async def _ensure_permissions(db: AsyncSession) -> list[Permission]:
     return permissions
 
 
-async def _ensure_owner_template(db: AsyncSession, permissions: list[Permission]) -> RoleTemplate:
-    template = await db.scalar(select(RoleTemplate).where(RoleTemplate.code == OWNER_TEMPLATE_CODE))
-    if template is None:
-        template = RoleTemplate(
-            code=OWNER_TEMPLATE_CODE,
-            name="Owner",
-            description="Full organization administration access.",
-            is_active=True,
-        )
-        db.add(template)
-        await db.flush()
-    existing = {
-        pid
-        for (pid,) in (
-            await db.execute(
-                select(RoleTemplatePermission.permission_id).where(
-                    RoleTemplatePermission.role_template_id == template.id
-                )
-            )
-        ).all()
-    }
-    for permission in permissions:
-        if permission.id not in existing:
-            db.add(
-                RoleTemplatePermission(
-                    role_template_id=template.id,
-                    permission_id=permission.id,
-                )
-            )
-    await db.flush()
-    return template
-
-
 async def _get_or_create_org(db: AsyncSession) -> Organization:
     code = os.environ.get("ORGANIZATION_CODE", os.environ.get("TENANT_CODE", "demo"))
     name = os.environ.get("ORGANIZATION_NAME", os.environ.get("TENANT_NAME", "Demo Organization"))
@@ -114,7 +77,6 @@ async def _get_or_create_org(db: AsyncSession) -> Organization:
 async def _ensure_owner_role(
     db: AsyncSession,
     org: Organization,
-    template: RoleTemplate,
     permissions: list[Permission],
 ) -> Role:
     role = await db.scalar(
@@ -123,7 +85,6 @@ async def _ensure_owner_role(
     if role is None:
         role = Role(
             organization_id=org.id,
-            template_id=template.id,
             code=OWNER_ROLE_CODE,
             name="Owner",
             description="Full organization administration access.",
@@ -159,19 +120,13 @@ async def _get_or_create_owner(db: AsyncSession, org: Organization, role: Role) 
     email = os.environ.get("USER_EMAIL", os.environ.get("ADMIN_EMAIL", "owner@example.com"))
     phone = os.environ.get("USER_PHONE")
     password = os.environ.get("USER_PASSWORD", os.environ.get("ADMIN_PASSWORD", "ChangeMe123!"))
-    email_n = normalize_email(email)
-    phone_n = normalize_phone(phone)
-    user = None
-    if email_n:
-        user = await db.scalar(select(User).where(User.email_normalized == email_n))
+    user = await db.scalar(select(User).where(func.lower(User.email) == email.casefold()))
     created = False
     if user is None:
         user = User(
             name=os.environ.get("USER_NAME", "Owner User"),
             email=email,
-            email_normalized=email_n,
             phone=phone,
-            phone_normalized=phone_n,
             password_hash=security.hash_password(password),
             status=UserStatus.ACTIVE,
         )
@@ -218,9 +173,8 @@ async def _get_or_create_owner(db: AsyncSession, org: Organization, role: Role) 
 async def main() -> None:
     async with SessionFactory() as db:
         permissions = await _ensure_permissions(db)
-        template = await _ensure_owner_template(db, permissions)
         org = await _get_or_create_org(db)
-        role = await _ensure_owner_role(db, org, template, permissions)
+        role = await _ensure_owner_role(db, org, permissions)
         email, created = await _get_or_create_owner(db, org, role)
         await db.commit()
         print(f"Organization: {org.code} ({org.id})")

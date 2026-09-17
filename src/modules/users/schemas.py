@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import Query
-from pydantic import Field, model_validator
+from pydantic import EmailStr, Field, model_validator
 
 from src.foundation_enums import UserStatus
 from src.pagination import Page
@@ -46,21 +46,19 @@ def user_filters(
 
 class UserCreate(RequestSchema):
     name: str = Field(min_length=1, max_length=200)
-    email: str | None = Field(default=None, max_length=255)
+    email: EmailStr | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=50)
     password: str = Field(min_length=8, max_length=128)
     role_ids: list[uuid.UUID] = Field(default_factory=list)
 
-
-class UserUpdate(RequestSchema):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
-    email: str | None = Field(default=None, max_length=255)
-    phone: str | None = Field(default=None, max_length=50)
-    status: UserStatus | None = None
-    role_ids: list[uuid.UUID] | None = None
+    @model_validator(mode="after")
+    def login_identifier_required(self):
+        if self.email is None and self.phone is None:
+            raise ValueError("email or phone is required")
+        return self
 
 
 class UserProfileUpdate(RequestSchema):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    email: str | None = Field(default=None, max_length=255)
+    email: EmailStr | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=50)

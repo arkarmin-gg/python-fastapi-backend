@@ -16,7 +16,6 @@ from src.modules.memberships.models import OrganizationMembership
 from src.modules.organizations.models import Organization
 from src.modules.rbac.models import MembershipRole, Permission, Role, RolePermission
 from src.modules.users.models import User
-from src.modules.users.normalize import normalize_email
 
 
 @pytest_asyncio.fixture
@@ -122,7 +121,6 @@ async def make_user_with_permissions(
     user = User(
         name="Test User",
         email=email_value,
-        email_normalized=normalize_email(email_value),
         phone=phone,
         password_hash=security.hash_password(password),
     )

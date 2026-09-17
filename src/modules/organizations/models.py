@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String
+from sqlalchemy import CheckConstraint, DateTime, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.foundation_enums import OrganizationStatus
@@ -28,6 +28,12 @@ class Organization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     roles = relationship("Role", back_populates="organization")
 
     __table_args__ = (
+        CheckConstraint("char_length(trim(code)) > 0", name="code_not_blank"),
+        CheckConstraint("char_length(trim(name)) > 0", name="name_not_blank"),
+        CheckConstraint(
+            "status IN ('active', 'suspended', 'inactive', 'pending_deletion', 'deleted')",
+            name="status_valid",
+        ),
         Index("organizations_status_idx", "status"),
         Index("organizations_deleted_at_idx", "deleted_at"),
     )

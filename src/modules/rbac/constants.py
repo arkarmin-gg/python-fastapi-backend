@@ -1,7 +1,6 @@
 from enum import StrEnum
 
 OWNER_ROLE_CODE = "owner"
-OWNER_TEMPLATE_CODE = "owner"
 
 
 class ActionType(StrEnum):

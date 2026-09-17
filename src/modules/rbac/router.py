@@ -68,8 +68,8 @@ def role_permission_sort(sort: Annotated[str | None, Query()] = None) -> tuple[S
 def membership_role_sort(sort: Annotated[str | None, Query()] = None) -> tuple[SortSpec, ...]:
     return parse_sort(
         sort,
-        allowed_fields={"user_id", "role_id", "id"},
-        default=("user_id", "role_id", "id"),
+        allowed_fields={"membership_id", "role_id", "id"},
+        default=("membership_id", "role_id", "id"),
     )
 
 
@@ -134,6 +134,7 @@ async def update_role(db: DbSession, current: CurrentUser, role_id: uuid.UUID, b
         role_id,
         body,
         actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
     )
 
 
@@ -204,6 +205,7 @@ async def create_role_permission(
         current.organization_id,
         body,
         actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
     )
 
 
@@ -245,13 +247,14 @@ async def delete_role_permission(
         current.organization_id,
         role_permission_id,
         actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
     )
 
 
 @router.get(
     "/membership-roles",
     response_model=MembershipRoleListResponse,
-    dependencies=[Depends(require_permission("users.read"))],
+    dependencies=[Depends(require_permission("roles.read"))],
     responses=error_responses(*AUTH_ERRORS),
 )
 async def list_membership_roles(
@@ -270,7 +273,7 @@ async def list_membership_roles(
     "/membership-roles",
     response_model=MembershipRoleRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permission("users.update"))],
+    dependencies=[Depends(require_permission("roles.update"))],
     responses=error_responses(*AUTH_ERRORS, InvalidUser, InvalidRole, MembershipRoleConflict),
 )
 async def create_membership_role(
@@ -283,13 +286,14 @@ async def create_membership_role(
         current.organization_id,
         body,
         actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
     )
 
 
 @router.get(
     "/membership-roles/{membership_role_id}",
     response_model=MembershipRoleRead,
-    dependencies=[Depends(require_permission("users.read"))],
+    dependencies=[Depends(require_permission("roles.read"))],
     responses=error_responses(*AUTH_ERRORS, MembershipRoleNotFound),
 )
 async def get_membership_role(
@@ -307,7 +311,7 @@ async def get_membership_role(
     "/membership-roles/{membership_role_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,
-    dependencies=[Depends(require_permission("users.update"))],
+    dependencies=[Depends(require_permission("roles.update"))],
     responses=error_responses(*AUTH_ERRORS, MembershipRoleNotFound),
 )
 async def delete_membership_role(
@@ -320,4 +324,5 @@ async def delete_membership_role(
         current.organization_id,
         membership_role_id,
         actor_user_id=current.user_id,
+        actor_membership_id=current.membership_id,
     )

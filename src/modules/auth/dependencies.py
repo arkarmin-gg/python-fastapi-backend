@@ -6,10 +6,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.dependencies import DbSession
 from src.exceptions import InvalidToken
-from src.foundation_enums import MembershipStatus, UserStatus
+from src.foundation_enums import MembershipStatus, OrganizationStatus, UserStatus
 from src.modules.auth import security
 from src.modules.auth.exceptions import InactiveUser
 from src.modules.memberships.models import OrganizationMembership
+from src.modules.organizations.models import Organization
 from src.modules.users import service as user_service
 from src.modules.users.models import User
 
@@ -54,6 +55,14 @@ async def get_current_user_context(
         raise InvalidToken()
     if user.status != UserStatus.ACTIVE:
         raise InactiveUser()
+
+    organization = await db.get(Organization, organization_id)
+    if (
+        organization is None
+        or organization.status != OrganizationStatus.ACTIVE
+        or organization.deleted_at is not None
+    ):
+        raise InvalidToken()
 
     membership = await db.get(OrganizationMembership, membership_id)
     if (

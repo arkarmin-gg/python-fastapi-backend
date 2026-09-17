@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,7 +15,7 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "audit_logs"
 
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True
     )
     actor_type: Mapped[ActorType] = str_enum_column(
         ActorType,
@@ -46,6 +46,10 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "actor_type IN ('user', 'system', 'service', 'api_key')",
+            name="actor_type_valid",
+        ),
         Index(
             "audit_logs_org_entity_idx",
             "organization_id",
@@ -65,4 +69,13 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
             "created_at",
         ),
         Index("audit_logs_org_created_at_idx", "organization_id", "created_at"),
+        Index(
+            "audit_logs_org_action_created_at_idx",
+            "organization_id",
+            "action",
+            "created_at",
+        ),
+        Index("audit_logs_actor_user_id_idx", "actor_user_id"),
+        Index("audit_logs_request_id_idx", "request_id"),
+        Index("audit_logs_trace_id_idx", "trace_id"),
     )
