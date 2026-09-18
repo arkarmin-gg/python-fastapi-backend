@@ -14,7 +14,7 @@ class AuthSettings(BaseSettings):
 
     JWT_SECRET: str = Field(min_length=32)
     JWT_ALG: str = "HS256"
-    JWT_ACCESS_EXP_MINUTES: int = 30
+    JWT_ACCESS_EXP_MINUTES: int = 15
     REFRESH_TOKEN_EXP_DAYS: int = 14
 
 
