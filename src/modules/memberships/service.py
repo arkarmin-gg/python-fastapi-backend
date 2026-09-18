@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.foundation_enums import MembershipStatus
 from src.modules.audit_logs.service import record_audit_log
@@ -49,7 +50,9 @@ async def get_by_id(
     membership_id: uuid.UUID,
 ) -> OrganizationMembership | None:
     return await db.scalar(
-        select(OrganizationMembership).where(
+        select(OrganizationMembership)
+        .options(*_membership_load_options())
+        .where(
             OrganizationMembership.organization_id == organization_id,
             OrganizationMembership.id == membership_id,
         )
@@ -64,9 +67,9 @@ async def list_memberships(
     sort: tuple[SortSpec, ...],
 ) -> Page[OrganizationMembership]:
     stmt = _apply_filters(
-        select(OrganizationMembership).where(
-            OrganizationMembership.organization_id == organization_id
-        ),
+        select(OrganizationMembership)
+        .options(*_membership_load_options())
+        .where(OrganizationMembership.organization_id == organization_id),
         filters,
     )
     stmt = apply_sort(stmt, sort, MEMBERSHIP_SORT_COLUMNS)
@@ -119,8 +122,9 @@ async def invite(
         after_json=_loggable(membership),
     )
     await db.commit()
-    await db.refresh(membership)
-    return membership
+    loaded = await get_by_id(db, organization_id, membership.id)
+    assert loaded is not None
+    return loaded
 
 
 async def update(
@@ -169,8 +173,9 @@ async def update(
         after_json=_loggable(membership),
     )
     await db.commit()
-    await db.refresh(membership)
-    return membership
+    loaded = await get_by_id(db, organization_id, membership.id)
+    assert loaded is not None
+    return loaded
 
 
 async def remove(
@@ -200,6 +205,15 @@ def _apply_filters[StmtT: Select[Any]](
     if filters.status is not None:
         stmt = stmt.where(OrganizationMembership.status == filters.status)
     return stmt
+
+
+def _membership_load_options():
+    return (
+        selectinload(OrganizationMembership.user),
+        selectinload(OrganizationMembership.invited_by_membership).selectinload(
+            OrganizationMembership.user
+        ),
+    )
 
 
 def _loggable(membership: OrganizationMembership) -> dict[str, Any]:

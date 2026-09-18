@@ -3,7 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Query
-from pydantic import model_validator
+from pydantic import IPvAnyAddress, model_validator
 
 from src.foundation_enums import ActorType
 from src.pagination import Page
@@ -27,7 +27,7 @@ class AuditLogRead(ResponseSchema):
     reason: str | None
     request_id: str | None
     trace_id: str | None
-    ip_address: str | None
+    ip_address: IPvAnyAddress | None
     user_agent: str | None
     created_at: datetime
 

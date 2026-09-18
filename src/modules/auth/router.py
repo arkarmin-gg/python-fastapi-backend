@@ -12,6 +12,7 @@ from src.modules.auth.schemas import (
     TokenResponse,
 )
 from src.modules.users import service as user_service
+from src.modules.users.exceptions import UserNotFound
 from src.modules.users.schemas import UserProfileUpdate, UserRead
 from src.schemas import error_responses
 
@@ -65,14 +66,19 @@ async def logout(current: CurrentUser, db: DbSession) -> None:
 @router.get("/me", response_model=UserRead, responses=error_responses(*_AUTH_ERRORS))
 async def me(current: CurrentUser, db: DbSession):
     user = await user_service.get_by_id(db, current.user_id)
-    assert user is not None
+    if user is None:
+        raise UserNotFound()
+
     await db.refresh(user)
+    await user_service.attach_permission_codes(db, [user], organization_id=current.organization_id)
     return user
 
 
 @router.patch("/me", response_model=UserRead, responses=error_responses(*_AUTH_ERRORS))
 async def update_me(current: CurrentUser, db: DbSession, body: UserProfileUpdate):
-    return await user_service.update_profile(db, current.user_id, body)
+    user = await user_service.update_profile(db, current.user_id, body)
+    await user_service.attach_permission_codes(db, [user], organization_id=current.organization_id)
+    return user
 
 
 @router.patch(

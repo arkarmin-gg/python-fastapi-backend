@@ -36,12 +36,28 @@ class OrganizationMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     organization = relationship("Organization", back_populates="memberships")
     user = relationship("User", back_populates="memberships")
+    invited_by_membership = relationship(
+        "OrganizationMembership",
+        foreign_keys=[invited_by_membership_id],
+        remote_side="OrganizationMembership.id",
+        uselist=False,
+    )
     role_links = relationship(
         "MembershipRole",
         back_populates="membership",
         foreign_keys="MembershipRole.membership_id",
         overlaps="membership_links,role",
     )
+
+    @property
+    def user_name(self) -> str:
+        return self.user.name
+
+    @property
+    def invited_by_user_name(self) -> str | None:
+        if self.invited_by_membership is None:
+            return None
+        return self.invited_by_membership.user.name
 
     __table_args__ = (
         CheckConstraint(

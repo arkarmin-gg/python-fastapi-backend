@@ -24,6 +24,7 @@ async def test_audit_log_list_and_get_are_organization_scoped(
         actor_membership_id=actor._test_membership_id,  # type: ignore[attr-defined]
         action="test.action",
         entity_type="test",
+        ip_address="127.0.0.1",
     )
     other_log = AuditLog(
         organization_id=other_organization.id,
@@ -40,6 +41,7 @@ async def test_audit_log_list_and_get_are_organization_scoped(
     )
     assert listed.status_code == 200, listed.text
     assert [str(own_log.id)] == [row["id"] for row in listed.json()["items"]]
+    assert listed.json()["items"][0]["ip_address"] == "127.0.0.1"
 
     fetched = await client.get(f"/api/v1/audit-logs/{own_log.id}", headers=headers)
     assert fetched.status_code == 200, fetched.text

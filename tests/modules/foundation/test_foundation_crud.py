@@ -183,6 +183,52 @@ async def test_create_role_and_list(client: AsyncClient, db_session: AsyncSessio
 
 
 @pytest.mark.asyncio
+async def test_update_role_replaces_permissions(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    org = await make_organization(db_session)
+    actor = await make_user_with_permissions(
+        db_session,
+        organization=org,
+        permissions=["roles.create", "roles.read", "roles.update"],
+    )
+    permissions = [
+        Permission(code=f"test.role-update-{index}", name=f"Permission {index}", module="test")
+        for index in range(6)
+    ]
+    db_session.add_all(permissions)
+    await db_session.commit()
+
+    created = await client.post(
+        "/api/v1/roles",
+        headers=await auth_header_for(actor),
+        json={
+            "code": "viewer",
+            "name": "Viewer",
+            "permission_ids": [str(permission.id) for permission in permissions[:3]],
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    updated = await client.patch(
+        f"/api/v1/roles/{created.json()['id']}",
+        headers=await auth_header_for(actor),
+        json={
+            "code": "viewer",
+            "name": "Viewer",
+            "description": "This is viewer role",
+            "is_active": True,
+            "permission_ids": [str(permission.id) for permission in permissions],
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert {permission["id"] for permission in updated.json()["permissions"]} == {
+        str(permission.id) for permission in permissions
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_and_get_user_are_organization_scoped(
     client: AsyncClient,
     db_session: AsyncSession,

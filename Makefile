@@ -17,7 +17,7 @@ install:
 	uv sync
 
 run:
-	uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
+	uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8003
 
 migrate:
 	uv run alembic upgrade head

@@ -45,6 +45,16 @@ async def test_login_refresh_logout(client: AsyncClient, db_session: AsyncSessio
     )
     assert me.status_code == 200
     assert me.json()["email"] == "owner@example.com"
+    assert me.json()["permission_codes"] == ["organizations.read"]
+
+    patched = await client.patch(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+        json={"name": "Updated Owner"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "Updated Owner"
+    assert patched.json()["permission_codes"] == ["organizations.read"]
 
     refreshed = await client.post(
         "/api/v1/auth/refresh",

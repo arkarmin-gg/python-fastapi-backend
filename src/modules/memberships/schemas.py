@@ -14,8 +14,10 @@ class MembershipRead(ResponseSchema):
     id: uuid.UUID
     organization_id: uuid.UUID
     user_id: uuid.UUID
+    user_name: str
     status: MembershipStatus
     invited_by_membership_id: uuid.UUID | None
+    invited_by_user_name: str | None
     invited_at: datetime | None
     joined_at: datetime | None
     activated_at: datetime | None

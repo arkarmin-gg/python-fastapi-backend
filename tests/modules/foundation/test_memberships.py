@@ -42,6 +42,8 @@ async def test_membership_lifecycle_is_scoped_and_preserves_global_identity(
     assert invited.status_code == 201, invited.text
     membership_id = invited.json()["id"]
     assert invited.json()["status"] == MembershipStatus.INVITED
+    assert invited.json()["user_name"] == target.name
+    assert invited.json()["invited_by_user_name"] == actor.name
     assert invited.json()["invited_by_membership_id"] == str(
         actor._test_membership_id  # type: ignore[attr-defined]
     )
@@ -49,6 +51,9 @@ async def test_membership_lifecycle_is_scoped_and_preserves_global_identity(
     listed = await client.get("/api/v1/memberships", headers=headers)
     assert listed.status_code == 200, listed.text
     assert membership_id in {row["id"] for row in listed.json()["items"]}
+    invited_row = next(row for row in listed.json()["items"] if row["id"] == membership_id)
+    assert invited_row["user_name"] == target.name
+    assert invited_row["invited_by_user_name"] == actor.name
 
     other_membership_id = target._test_membership_id  # type: ignore[attr-defined]
     cross_org = await client.get(

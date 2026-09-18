@@ -2,9 +2,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from src.modules.audit_logs.service import record_audit_log
 from src.modules.rbac.exceptions import (
@@ -466,16 +467,34 @@ async def _replace_permissions(
     *,
     actor_membership_id: uuid.UUID | None,
 ) -> None:
-    await db.refresh(role, attribute_names=["permission_links"])
-    role.permission_links = [
+    # Delete first. PostgreSQL enforces the unique role/permission key
+    # immediately, so replacing the collection in one unit of work can try
+    # the INSERT before SQLAlchemy deletes the existing link.
+    await db.execute(
+        delete(RolePermission).where(
+            RolePermission.organization_id == role.organization_id,
+            RolePermission.role_id == role.id,
+        )
+    )
+    await db.flush()
+    permissions = {
+        permission.id: permission
+        for permission in (
+            await db.scalars(select(Permission).where(Permission.id.in_(set(permission_ids))))
+        ).all()
+    }
+    links = [
         RolePermission(
             organization_id=role.organization_id,
             role_id=role.id,
             permission_id=permission_id,
+            permission=permissions[permission_id],
             granted_by_membership_id=actor_membership_id,
         )
         for permission_id in set(permission_ids)
     ]
+    db.add_all(links)
+    set_committed_value(role, "permission_links", links)
 
 
 def _apply_filters[StmtT: Select[Any]](stmt: StmtT, filters: RoleFilters) -> StmtT:
