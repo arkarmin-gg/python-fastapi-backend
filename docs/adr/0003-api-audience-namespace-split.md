@@ -5,13 +5,17 @@
 
 The current API keeps foundation resources directly under `/api/v1`:
 
-- `/api/v1/auth`
+- `/api/v1/auth` — `login`, `refresh`, `logout`, `me`, `me/change-password`
 - `/api/v1/organizations`
 - `/api/v1/memberships`
 - `/api/v1/users`
 - `/api/v1/roles`
 - `/api/v1/permissions`
+- `/api/v1/role-permissions`
+- `/api/v1/membership-roles`
 - `/api/v1/audit-logs`
+
+`GET /health` lives outside the versioned prefix.
 
 Protected routes use organization membership auth. Access tokens carry `sub` (user id),
 `organization_id`, and `membership_id`; route dependencies derive organization context

@@ -25,7 +25,7 @@ OPENAPI_TAGS = [
         "name": "RBAC",
         "description": "Organization roles, global permissions, and membership-role assignments.",
     },
-    {"name": "Audit Logs", "description": "Organization-scoped audit trail."},
+    {"name": "Audit Logs", "description": "Read-only audit trail (organization-scoped or global)."},
 ]
 
 

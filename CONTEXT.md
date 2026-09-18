@@ -1,6 +1,6 @@
 # python-fastapi-backend
 
-A FastAPI/SQLAlchemy/Postgres starter for a multi-tenant backend. It ships the
+A FastAPI/SQLAlchemy/Postgres starter for a multi-organization backend. It ships the
 foundation layer only: global user identity, organizations, memberships, RBAC,
 auth (sessions + refresh rotation), and audit logging. There is no business domain
 on top of it yet — that's for whatever you build next.
@@ -65,6 +65,15 @@ _Avoid_: permission grant
 An organization-owned assignment connecting one membership to one role.
 _Avoid_: user_roles, group membership
 
+**Foundation permission modules**:
+Seeded catalog modules: `organizations`, `users`, `memberships`, `roles`, `permissions`,
+`audit_logs`. Standard CRUD codes use `{module}.{create|read|update|delete}`; memberships
+also expose `memberships.invite` and `memberships.remove`.
+
+**Role Permission API** / **Membership Role API**:
+Explicit assignment endpoints at `/api/v1/role-permissions` and `/api/v1/membership-roles`
+(in addition to `permission_ids` / `role_ids` on some write payloads).
+
 ### Auth Credentials
 
 **User Session**:
@@ -78,10 +87,26 @@ revokes the session/token family. Each refresh selects an organization and prove
 still has an active membership there; a rotated token cannot outlive its session.
 _Avoid_: access token (short-lived JWT is separate)
 
+**Access Token (JWT)**:
+Short-lived bearer token. Claims include `sub` (user id), `organization_id`, and
+`membership_id` for the organization selected at login or refresh.
+_Avoid_: storing organization on the user row as the sole context
+
 **Email Verification Token** / **Password Reset Token**:
-One-time hashed tokens for account lifecycle flows.
+One-time hashed tokens for account lifecycle flows. **Schema-only today** (tables and ORM
+models exist; no issue or consume API routes yet).
 
 ### Observability
+
+**Request Context**:
+Per-request metadata captured from the HTTP layer: optional `x-request-id` and
+`x-trace-id` headers, client IP, and user agent. Fed into audit rows when services call
+`record_audit_log`.
+_Avoid_: assuming correlation fields are always present
+
+**Actor Type**:
+Who performed an audited action: `user`, `system`, `service`, or `api_key` (see
+`ActorType` in `src/foundation_enums.py`).
 
 **Audit Log**:
 An append-only record of a management or auth action. May be organization-scoped or

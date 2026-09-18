@@ -8,7 +8,7 @@ generic foundation only, ready to build a real domain on top of:
 - organization-scoped RBAC with a global permission catalog and explicit role-permission /
   membership-role assignment lifecycle
 - membership-aware auth with sessions and refresh-token rotation
-- organization-scoped audit logs
+- audit logs (organization-scoped or global)
 
 Schema source of truth: `database.dbml`.
 
@@ -54,13 +54,17 @@ make seed
 make run
 ```
 
+`make run` serves the API on port **8003** with autoreload. `GET /health` (unversioned)
+returns environment, app name, and version.
+
 The seed script creates one organization, the full permission catalog, an Owner role, one
 owner user, and an active membership. Defaults (override via env vars):
 
 - `ORGANIZATION_CODE=demo` (also accepts legacy `TENANT_CODE`)
 - `ORGANIZATION_NAME="Demo Organization"` (also accepts legacy `TENANT_NAME`)
-- `ADMIN_EMAIL=owner@example.com`
-- `ADMIN_PASSWORD=ChangeMe123!`
+- `ADMIN_EMAIL=owner@example.com` (aliases: `USER_EMAIL`)
+- `ADMIN_PASSWORD=ChangeMe123!` (aliases: `USER_PASSWORD`)
+- `USER_NAME`, `USER_PHONE` optional for the seeded owner user
 
 Log in with:
 
@@ -72,6 +76,9 @@ POST /api/v1/auth/login
   "password": "ChangeMe123!"
 }
 ```
+
+Auth routes: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`,
+`GET|PATCH /api/v1/auth/me`, and `PATCH /api/v1/auth/me/change-password`.
 
 Use the returned bearer token for `/api/v1/organizations`, `/api/v1/users`,
 `/api/v1/memberships`, `/api/v1/roles`, `/api/v1/permissions`, `/api/v1/role-permissions`,
@@ -86,7 +93,8 @@ organization-scoped access token.
 
 | Command                      | What it does                         |
 | ----------------------------- | ------------------------------------ |
-| `make run`                   | API with autoreload                  |
+| `make install`               | install dependencies (`uv sync`)     |
+| `make run`                   | API with autoreload (port 8003)      |
 | `make migrate`               | `alembic upgrade head`               |
 | `make makemigration m="msg"` | autogenerate a migration             |
 | `make downgrade`             | revert the last migration            |
@@ -100,6 +108,14 @@ organization-scoped access token.
 - UUID primary keys with server-side `gen_random_uuid()`.
 - Organization-owned tables carry `organization_id`; protected routes derive organization
   and membership context from the JWT rather than from client-supplied parameters.
+- `GET /organizations` lists only the organization in the current JWT (not a global
+  directory). There is no `POST /organizations` route; use `make seed` or direct DB setup
+  for the first org. The seeded `organizations.create` permission has no matching route yet.
+- `POST /users` provisions a global user in the current organization (optional `role_ids`).
+  There is no update or delete on `/users`; profile changes use `/auth/me`.
+- In production (`ENVIRONMENT=production`), `CORS_ORIGINS` cannot include `*`.
+- Incoming `x-request-id` and `x-trace-id` headers (plus client IP and user agent) feed
+  audit log correlation when present.
 - Login requires `organization_code` or `organization_id`, plus an email-or-phone
   identifier and an active membership in that organization.
 - Enums are varchar-backed `StrEnum` values (see `docs/adr/0001-varchar-backed-enums.md`).

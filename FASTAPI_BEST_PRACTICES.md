@@ -25,33 +25,40 @@ Pin to these versions or newer. Examples in this file assume them.
 
 ## Project Structure
 
-Organize by domain, not by file type. One package per bounded context.
+Organize by domain, not by file type. One package per bounded context under `src/modules/`.
 
 ```
 src/
-├── {domain}/           # e.g., auth/, posts/, aws/
-│   ├── router.py       # API endpoints
-│   ├── schemas.py      # Pydantic models
-│   ├── models.py       # SQLAlchemy ORM models
-│   ├── service.py      # Business logic
-│   ├── dependencies.py # Route dependencies
-│   ├── config.py       # Domain-scoped BaseSettings
-│   ├── constants.py    # Constants and error codes
-│   ├── exceptions.py   # Domain-specific exceptions
-│   └── utils.py        # Helper functions
+├── api/
+│   └── routers.py      # Assembles v1 (auth + foundation routers)
+├── modules/
+│   └── {domain}/       # e.g. auth/, organizations/, rbac/
+│       ├── router.py
+│       ├── schemas.py
+│       ├── models.py
+│       ├── service.py
+│       ├── exceptions.py
+│       ├── dependencies.py   # optional (auth, rbac)
+│       ├── config.py         # optional (auth)
+│       └── constants.py      # optional (rbac)
 ├── config.py           # Global BaseSettings
-├── models.py           # Shared Pydantic / ORM bases
+├── models.py           # Shared ORM bases + mixins
+├── schemas.py          # Shared Pydantic bases (ErrorResponse, etc.)
 ├── exceptions.py       # Global exceptions
 ├── database.py         # Async engine + session factory
+├── dependencies.py     # DbSession, request context
+├── pagination.py       # Page[T], paginate()
+├── query_filters.py    # sort, search, optional filters
+├── registry.py         # Imports all model modules for metadata
 └── main.py             # FastAPI app + lifespan
 ```
 
-**Cross-domain imports**: always use the explicit module name. Never `from src.auth import *`.
+**Cross-domain imports**: always use the explicit module path. Never `from src.modules.auth import *`.
 
 ```python
-from src.auth import constants as auth_constants
-from src.notifications import service as notification_service
-from src.posts.constants import ErrorCode as PostsErrorCode
+from src.modules.auth import security
+from src.modules.rbac import service as rbac_service
+from src.modules.rbac.constants import permission_code
 ```
 
 ## Async Routes
@@ -155,23 +162,21 @@ class CustomModel(BaseModel):
 `pydantic-settings` is its own package since Pydantic v2.
 
 ```python
-# src/auth/config.py
-from datetime import timedelta
+# src/modules/auth/config.py
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class AuthConfig(BaseSettings):
+class AuthSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTH_", env_file=".env", extra="ignore")
 
-    JWT_ALG: str
-    JWT_SECRET: str
-    JWT_EXP_MINUTES: int = 5
-    REFRESH_TOKEN_KEY: str
-    REFRESH_TOKEN_EXP: timedelta = timedelta(days=30)
-    SECURE_COOKIES: bool = True
+    JWT_SECRET: str = Field(min_length=32)
+    JWT_ALG: str = "HS256"
+    JWT_ACCESS_EXP_MINUTES: int = 15
+    REFRESH_TOKEN_EXP_DAYS: int = 14
 
 
-auth_settings = AuthConfig()
+auth_settings = AuthSettings()
 ```
 
 ## Dependencies
@@ -325,9 +330,9 @@ async def paginate[ItemT](
 Pagination = Annotated[PaginationParams, Depends(pagination_params)]
 
 @router.get("")
-async def list_admins(db: DbSession, pagination: Pagination) -> Page[AdminRead]:
-    stmt = select(Admin).order_by(Admin.created_at.desc())
-    count_stmt = select(func.count(Admin.id))
+async def list_users(db: DbSession, pagination: Pagination) -> Page[UserRead]:
+    stmt = select(User).order_by(User.created_at.desc())
+    count_stmt = select(func.count(User.id))
     return await paginate(db, stmt, count_stmt, pagination)
 ```
 
@@ -343,7 +348,7 @@ count statement so the two stay in sync.
 
 ```python
 # src/query_filters.py — note the generic bound: the helper returns the SAME Select
-# subtype it was given, so chaining preserves Select[tuple[ActivityLog]] vs Select[tuple[int]].
+# subtype it was given, so chaining preserves Select[tuple[AuditLog]] vs Select[tuple[int]].
 type Column = ColumnElement[Any] | InstrumentedAttribute[Any]
 
 def where_if_not_none[StmtT: Select[Any]](
@@ -356,28 +361,29 @@ def where_if_not_none[StmtT: Select[Any]](
 
 ```python
 # Apply the same filters to data + count via one generic helper.
-def _apply_filters[StmtT: Select[Any]](stmt: StmtT, f: ActivityLogFilters) -> StmtT:
-    stmt = where_if_not_none(stmt, ActivityLog.actor_id, f.actor_id)
-    stmt = where_gte_if_not_none(stmt, ActivityLog.created_at, f.created_from)
+def _apply_filters[StmtT: Select[Any]](stmt: StmtT, f: AuditLogFilters) -> StmtT:
+    stmt = where_if_not_none(stmt, AuditLog.actor_user_id, f.actor_user_id)
+    stmt = where_if_not_none(stmt, AuditLog.action, f.action)
     return stmt
 
-data = _apply_filters(select(ActivityLog), filters)
-count = _apply_filters(select(func.count(ActivityLog.id)), filters)
+data = _apply_filters(select(AuditLog), filters)
+count = _apply_filters(select(func.count(AuditLog.id)), filters)
 ```
 
 > **Why the `Column` alias accepts `InstrumentedAttribute`**: a mapped attribute
-> (`ActivityLog.actor_id`) is typed `InstrumentedAttribute[...]`, which type checkers do not
+> (`AuditLog.actor_user_id`) is typed `InstrumentedAttribute[...]`, which type checkers do not
 > treat as a `ColumnElement` even though it is one at runtime. Widening the parameter to
 > the union keeps the helpers callable on model columns without `# type: ignore`.
 
 ## List search, filters, and sorting (project pattern)
 
-Admin table-style lists follow [ADR 0006](docs/adr/0006-list-query-contract.md):
+Foundation list endpoints follow [ADR 0006](docs/adr/0006-list-query-contract.md):
 
-- Use `search` for case-insensitive substring search across documented text fields.
+- Use `search` on endpoints that expose it (organizations, users, roles) for case-insensitive substring search.
 - Treat blank `search` and blank optional string filters as absent.
-- Use flat explicit filters such as `role_ids`, `is_banned`, `rank_min`, and `key_prefix`.
-- Use timezone-aware `created_from`, `created_to`, `updated_from`, and `updated_to`.
+- Use flat explicit filters per endpoint (`status`, `user_id`, `is_active`, `role_id`, etc.).
+- `created_from` / `updated_*` helpers exist in `query_filters.py` but no list route exposes them yet.
+- `role_ids` on write bodies (`UserCreate`, role payloads) is not a repeated GET query filter.
 - Use one comma-separated `sort` string; prefix a field with `-` for descending.
 - Reject unknown, blank, or duplicate sort fields with `422`.
 - Append `id` as a stable tie-breaker internally when the requested sort omits it.
@@ -385,42 +391,38 @@ Admin table-style lists follow [ADR 0006](docs/adr/0006-list-query-contract.md):
 Examples:
 
 ```text
-GET /api/v1/admin/admins/?search=arkar&role_ids=<uuid>&sort=-created_at,email
-GET /api/v1/admin/rbac/roles?rank_min=1&module_codes=admins&sort=rank,name
-GET /api/v1/admin/settings/?key_prefix=auth.&sort=key
+GET /api/v1/users?search=owner@example&status=active&sort=-created_at,name
+GET /api/v1/roles?search=owner&is_active=true&sort=code
+GET /api/v1/audit-logs?action=auth.login&sort=-created_at
+GET /api/v1/memberships?user_id=<uuid>&status=active
 ```
 
 Manual QA checklist when changing this contract:
 
-- `GET /api/v1/admin/admins/?search=<known-email-fragment>` returns a filtered `Page`.
-- `GET /api/v1/admin/admins/?search=%20%20` behaves like no search.
-- `GET /api/v1/admin/rbac/roles?rank_min=99&rank_max=1` returns `422`.
-- `GET /api/v1/admin/rbac/roles?module_codes=admins` filters by exact module code.
-- `GET /api/v1/admin/settings/?key_prefix=auth.&limit=10&offset=0` returns `Page[SettingRead]`.
-- `GET /api/v1/admin/settings/?sort=missing_field` returns `422`.
+- `GET /api/v1/users?search=<known-email-fragment>` returns a filtered `Page`.
+- `GET /api/v1/users?search=%20%20` behaves like no search.
+- `GET /api/v1/roles?sort=missing_field` returns `422`.
+- `GET /api/v1/organizations` returns only the JWT's current organization (not a global directory).
+- `GET /api/v1/permissions` returns the full catalog (not paginated).
 
 ## API audience split (project pattern)
 
-There is a single audience: everything is Admin + RBAC. `src/api/routers.py` assembles
-`admin_router` (prefix `/admin`) and `auth_router` (prefix `/auth`) under the version
-prefix — there is no reserved second-audience namespace. See
-[ADR 0008](docs/adr/0008-collapse-to-single-audience.md), which supersedes an earlier
-`/admin` + `/app` split ([ADR 0003](docs/adr/0003-api-audience-namespace-split.md)) built
-for a second identity system that was removed rather than shipped.
+There is a single authenticated audience under `/api/v1`. `src/api/routers.py` mounts
+`auth_router` and `foundation_router` (organizations, memberships, users, rbac, audit_logs)
+under `settings.API_V1_PREFIX`. There is no `/admin` or `/app` namespace. See
+[ADR 0003](docs/adr/0003-api-audience-namespace-split.md) (superseded to a single versioned surface).
 
 ```python
-admin_router = APIRouter(prefix="/admin")
-admin_router.include_router(admins_router)
-admin_router.include_router(rbac_router)
-admin_router.include_router(settings_router)
-admin_router.include_router(activity_logs_router)
-
-auth_router = APIRouter(prefix="/auth")
-auth_router.include_router(admin_auth_router)
+foundation_router = APIRouter()
+foundation_router.include_router(organizations_router)
+foundation_router.include_router(memberships_router)
+foundation_router.include_router(users_router)
+foundation_router.include_router(rbac_router)
+foundation_router.include_router(audit_logs_router)
 
 v1 = APIRouter(prefix=settings.API_V1_PREFIX)
-v1.include_router(admin_router)
 v1.include_router(auth_router)
+v1.include_router(foundation_router)
 ```
 
 ## Background work — BackgroundTasks vs Celery
@@ -478,7 +480,7 @@ async def test_create_post(client: AsyncClient):
 Don't monkeypatch internals. Use FastAPI's built-in `dependency_overrides`.
 
 ```python
-from src.auth.dependencies import parse_jwt_data
+from src.modules.auth.dependencies import get_current_user_context
 from src.main import app
 
 
@@ -572,7 +574,7 @@ seen agents introduce.
 | `BackgroundTasks` for anything you'd page on                                       | No retry, dies with the worker.                      | Use Celery / Arq / RQ.                                                                                                |
 | Calling a sync ORM session inside `async def`                                      | Blocks the loop, may deadlock the pool.              | Use `AsyncSession`.                                                                                                   |
 | Returning a Pydantic model and _also_ setting `response_model=` to that same class | Model gets constructed twice (validate + serialize). | Either return a `dict`/ORM row and let `response_model` validate, or drop `response_model` and trust the return type. |
-| Importing across domains via deep paths (`from src.auth.service.user import ...`)  | Tight coupling, hard to refactor.                    | `from src.auth import service as auth_service`.                                                                       |
+| Importing across domains via deep paths (`from src.modules.auth.service import ...` from unrelated modules) | Tight coupling, hard to refactor.                    | `from src.modules.auth import service as auth_service`.                                                               |
 | Reusing one `BaseSettings` for the whole app                                       | Hard to reason about, every domain reads every var.  | One `BaseSettings` per domain.                                                                                        |
 | Mocking the database in integration tests                                          | Mock/prod divergence eventually fires in prod.       | Use a real DB (testcontainers, ephemeral schema) and `dependency_overrides` for auth/external services.               |
 

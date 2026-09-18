@@ -27,6 +27,8 @@ Project python_fastapi_backend {
     PostgreSQL-specific CHECK constraints, partial indexes, triggers,
     exclusion rules, and optional RLS policies should be implemented
     using Alembic migrations where DBML cannot express them precisely.
+    Row-level security (RLS) is noted here as a future option; it is not
+    implemented in the current application code or migrations.
   '''
 }
 

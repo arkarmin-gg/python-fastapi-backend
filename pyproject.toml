@@ -1,7 +1,7 @@
 [project]
 name = "python-fastapi-backend"
 version = "0.1.0"
-description = "FastAPI + SQLAlchemy + Postgres starter for a multi-tenant backend"
+description = "FastAPI + SQLAlchemy + Postgres starter for a multi-organization backend"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
